@@ -1,5 +1,5 @@
+use crate::model::{NbtBlockEntry, NbtPaletteEntry, ParsedSchematic};
 use flate2::read::GzDecoder;
-use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::io::Read;
 
@@ -63,37 +63,6 @@ impl NbtTag {
             _ => None,
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SchematicPaletteEntry {
-    pub block_id: String,
-    pub properties: BTreeMap<String, String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SchematicBlockPlacement {
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
-    pub state_index: usize,
-    pub block_id: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SchematicBlockCount {
-    pub block_id: String,
-    pub count: usize,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ParsedNbtSchematic {
-    pub format: String,
-    pub size: [i32; 3],
-    pub palette: Vec<SchematicPaletteEntry>,
-    pub blocks: Vec<SchematicBlockPlacement>,
-    pub block_counts: Vec<SchematicBlockCount>,
-    pub truncated: bool,
 }
 
 struct Cursor<'a> {
@@ -267,13 +236,14 @@ pub fn parse_nbt_root(raw: &[u8]) -> Result<(String, NbtTag), String> {
     Ok((root_name, payload))
 }
 
-pub fn parse_nbt_schematic_bytes(raw: &[u8]) -> Result<ParsedNbtSchematic, String> {
+pub fn parse_nbt_schematic_bytes(file_name: &str, raw: &[u8]) -> Result<ParsedSchematic, String> {
     let (_name, root_tag) = parse_nbt_root(raw)?;
     let root = root_tag
         .as_compound()
         .ok_or_else(|| "NBT root is not a compound".to_owned())?;
 
-    // Minecraft vanilla / Create structure `.nbt`: `size`, `palette` (or `Palette`), `blocks`
+    let data_version = root.get("DataVersion").and_then(|v| v.as_i32());
+
     let size_arr = root
         .get("size")
         .and_then(|s| s.as_i32_vec())
@@ -290,8 +260,8 @@ pub fn parse_nbt_schematic_bytes(raw: &[u8]) -> Result<ParsedNbtSchematic, Strin
         .and_then(|p| p.as_list())
         .unwrap_or(&[]);
 
-    let mut palette: Vec<SchematicPaletteEntry> = Vec::with_capacity(raw_palette.len());
-    for p_item in raw_palette {
+    let mut palette: Vec<NbtPaletteEntry> = Vec::with_capacity(raw_palette.len());
+    for (index, p_item) in raw_palette.iter().enumerate() {
         let Some(pmap) = p_item.as_compound() else {
             continue;
         };
@@ -300,7 +270,7 @@ pub fn parse_nbt_schematic_bytes(raw: &[u8]) -> Result<ParsedNbtSchematic, Strin
             .and_then(|v| v.as_str())
             .unwrap_or("minecraft:air")
             .to_owned();
-        let mut properties = BTreeMap::new();
+        let mut properties = HashMap::new();
         if let Some(props) = pmap.get("Properties").and_then(|v| v.as_compound()) {
             for (k, v) in props {
                 if let Some(vs) = v.as_str() {
@@ -310,9 +280,11 @@ pub fn parse_nbt_schematic_bytes(raw: &[u8]) -> Result<ParsedNbtSchematic, Strin
                 }
             }
         }
-        palette.push(SchematicPaletteEntry {
-            block_id,
+        palette.push(NbtPaletteEntry {
+            index,
+            name: block_id,
             properties,
+            count: 0,
         });
     }
 
@@ -323,51 +295,61 @@ pub fn parse_nbt_schematic_bytes(raw: &[u8]) -> Result<ParsedNbtSchematic, Strin
             "NBT file does not contain a 'blocks' list (unsupported schematic flavor)".to_owned()
         })?;
 
-    let mut blocks: Vec<SchematicBlockPlacement> = Vec::new();
-    let mut counts: HashMap<String, usize> = HashMap::new();
+    let mut blocks: Vec<NbtBlockEntry> = Vec::new();
+    let mut warnings = Vec::new();
     let mut max_xyz = [0i32; 3];
-    let mut truncated = false;
+    let mut total_placed_blocks = 0usize;
+    let mut has_create_entities = false;
 
     for b_item in raw_blocks {
         if blocks.len() >= MAX_SCHEMATIC_BLOCKS {
-            truncated = true;
+            warnings.push(format!(
+                "Truncated display at {MAX_SCHEMATIC_BLOCKS} blocks for responsiveness."
+            ));
             break;
         }
         let Some(bmap) = b_item.as_compound() else {
             continue;
         };
+        total_placed_blocks += 1;
         let state_idx = bmap
             .get("state")
             .and_then(|v| v.as_i32())
             .unwrap_or(0)
             .max(0) as usize;
-        let block_id = palette
-            .get(state_idx)
-            .map(|p| p.block_id.clone())
-            .unwrap_or_else(|| "minecraft:air".to_owned());
+        let (block_id, props) = match palette.get_mut(state_idx) {
+            Some(p) => {
+                p.count += 1;
+                (p.name.clone(), p.properties.clone())
+            }
+            None => ("minecraft:air".to_owned(), HashMap::new()),
+        };
         if block_id == "minecraft:air"
             || block_id == "minecraft:void_air"
             || block_id == "minecraft:cave_air"
         {
             continue;
         }
-        let pos = bmap
+        if block_id.starts_with("create:") && bmap.contains_key("nbt") {
+            has_create_entities = true;
+        }
+        let pos_vec = bmap
             .get("pos")
             .and_then(|p| p.as_i32_vec())
             .unwrap_or_else(|| vec![0, 0, 0]);
-        let x = *pos.first().unwrap_or(&0);
-        let y = *pos.get(1).unwrap_or(&0);
-        let z = *pos.get(2).unwrap_or(&0);
+        let x = *pos_vec.first().unwrap_or(&0);
+        let y = *pos_vec.get(1).unwrap_or(&0);
+        let z = *pos_vec.get(2).unwrap_or(&0);
         max_xyz[0] = max_xyz[0].max(x + 1);
         max_xyz[1] = max_xyz[1].max(y + 1);
         max_xyz[2] = max_xyz[2].max(z + 1);
-        *counts.entry(block_id.clone()).or_insert(0) += 1;
-        blocks.push(SchematicBlockPlacement {
-            x,
-            y,
-            z,
+
+        blocks.push(NbtBlockEntry {
+            pos: [x, y, z],
             state_index: state_idx,
             block_id,
+            properties: props,
+            has_block_entity_nbt: bmap.contains_key("nbt"),
         });
     }
 
@@ -375,23 +357,31 @@ pub fn parse_nbt_schematic_bytes(raw: &[u8]) -> Result<ParsedNbtSchematic, Strin
         size = max_xyz;
     }
 
-    let mut block_counts: Vec<SchematicBlockCount> = counts
-        .into_iter()
-        .map(|(block_id, count)| SchematicBlockCount { block_id, count })
-        .collect();
-    block_counts.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.block_id.cmp(&b.block_id)));
+    let entity_count = root
+        .get("entities")
+        .and_then(|e| e.as_list())
+        .map(|l| l.len())
+        .unwrap_or(0);
 
-    Ok(ParsedNbtSchematic {
-        format: if root.contains_key("DataVersion") {
+    palette.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.name.cmp(&b.name)));
+
+    Ok(ParsedSchematic {
+        file_name: file_name.to_owned(),
+        format_label: if data_version.is_some() {
             "Minecraft / Create Structure NBT".to_owned()
         } else {
             "Schematic NBT".to_owned()
         },
+        data_version,
         size,
+        total_placed_blocks,
+        non_air_blocks: blocks.len(),
+        entity_count,
+        has_create_entities,
         palette,
         blocks,
-        block_counts,
-        truncated,
+        warnings,
+        is_synthetic_demo: false,
     })
 }
 

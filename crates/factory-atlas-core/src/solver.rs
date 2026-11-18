@@ -293,7 +293,7 @@ fn check_edge_compatibility(
         && let Some(rk) = from.resource_kind
     {
         from_kind = rk;
-    } else if from.kind == NodeKind::Recipe
+    } else if matches!(from.kind, NodeKind::Recipe | NodeKind::Machine)
         && let Some(rid) = from.recipe_id.as_deref()
         && let Some(rec) = catalog.recipes_by_id.get(rid)
         && let Some(out) = rec.outputs.iter().find(|o| o.resource_id == edge.resource_id)
@@ -308,7 +308,7 @@ fn check_edge_compatibility(
             to_kind = rk;
         }
         to_expects_resource = to.resource_id.clone();
-    } else if to.kind == NodeKind::Recipe
+    } else if matches!(to.kind, NodeKind::Recipe | NodeKind::Machine)
         && let Some(rid) = to.recipe_id.as_deref()
         && let Some(rec) = catalog.recipes_by_id.get(rid)
         && let Some(inp) = rec.inputs.iter().find(|i| i.resource_id == edge.resource_id)
@@ -533,7 +533,7 @@ fn solve_component(
             continue;
         }
 
-        if node.kind == NodeKind::Recipe {
+        if matches!(node.kind, NodeKind::Recipe | NodeKind::Machine) {
             let rec = node
                 .recipe_id
                 .as_deref()
@@ -1292,7 +1292,7 @@ pub fn solve_factory_project(
                         .total_target_demand_per_min += i.required_per_min;
                 }
             }
-        } else if node.kind == NodeKind::Recipe {
+        } else if matches!(node.kind, NodeKind::Recipe | NodeKind::Machine) {
             for i in &calc.inputs {
                 get_or_insert_bal(&mut bal_map, &i.resource_id, i.kind).total_consumed_per_min +=
                     i.required_per_min;

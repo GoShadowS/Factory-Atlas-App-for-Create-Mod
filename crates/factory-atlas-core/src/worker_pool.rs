@@ -1,10 +1,12 @@
-use crate::jar_importer::{JarImportOptions, JarImportReport, import_mod_archive_file};
+use crate::jar_importer::{JarImportOptions, import_mod_archive_file};
 use crate::mc_model::{
     AssetSource, DirAssetSource, ResolvedMcAsset, build_local_visual_index_from_dir,
     load_visual_index_file, resolve_visual_entry_asset,
 };
-use crate::model::{FactoryProject, SolverResult, VisualEntrySummary};
-use crate::nbt_parser::{ParsedNbtSchematic, parse_nbt_schematic_bytes};
+use crate::model::{
+    FactoryProject, JarImportReport, ParsedSchematic, SolverResult, VisualEntrySummary,
+};
+use crate::nbt_parser::parse_nbt_schematic_bytes;
 use crate::solver::{SolverCatalog, solve_factory_project};
 use std::collections::VecDeque;
 use std::fs;
@@ -62,7 +64,7 @@ pub enum BackgroundOutput {
     NbtParsed {
         task_id: u64,
         path: PathBuf,
-        schematic: Box<ParsedNbtSchematic>,
+        schematic: Box<ParsedSchematic>,
     },
     ModArchiveImported {
         task_id: u64,
@@ -104,7 +106,7 @@ impl AssetSource for CombinedAssetSource {
     }
 }
 
-/// Bounded Rust worker pool for all heavy work (solver, .nbt parsing, .jar import, local visual indexing).
+/// Bounded Rust worker pool for all heavy work.
 pub struct WorkerPool {
     queue: Arc<(Mutex<SharedQueue>, Condvar)>,
     out_tx: Arc<Mutex<VecDeque<BackgroundOutput>>>,
@@ -249,17 +251,23 @@ impl WorkerPool {
                                 }
                             }
                             BackgroundJob::ParseNbtFile { path } => match fs::read(&path) {
-                                Ok(bytes) => match parse_nbt_schematic_bytes(&bytes) {
-                                    Ok(sch) => emit(BackgroundOutput::NbtParsed {
-                                        task_id: task.task_id,
-                                        path,
-                                        schematic: Box::new(sch),
-                                    }),
-                                    Err(err) => emit(BackgroundOutput::Failed {
-                                        task_id: task.task_id,
-                                        error: err,
-                                    }),
-                                },
+                                Ok(bytes) => {
+                                    let fname = path
+                                        .file_name()
+                                        .and_then(|s| s.to_str())
+                                        .unwrap_or("schematic.nbt");
+                                    match parse_nbt_schematic_bytes(fname, &bytes) {
+                                        Ok(sch) => emit(BackgroundOutput::NbtParsed {
+                                            task_id: task.task_id,
+                                            path,
+                                            schematic: Box::new(sch),
+                                        }),
+                                        Err(err) => emit(BackgroundOutput::Failed {
+                                            task_id: task.task_id,
+                                            error: err,
+                                        }),
+                                    }
+                                }
                                 Err(err) => emit(BackgroundOutput::Failed {
                                     task_id: task.task_id,
                                     error: format!("Cannot read {}: {err}", path.display()),

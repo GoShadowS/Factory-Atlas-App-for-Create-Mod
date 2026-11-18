@@ -1,5 +1,5 @@
 use crate::model::{AppSettings, FactoryProject};
-use crate::project_format::{load_project_json_str, save_project_json_str};
+use crate::project_format::{ProjectParseResult, parse_and_migrate_project, serialize_project};
 use directories::ProjectDirs;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -21,8 +21,8 @@ impl AppPaths {
             .and_then(|p| p.parent().map(|d| d.to_path_buf()))
             .unwrap_or_else(|| PathBuf::from("."));
 
-        let portable_flag = exe_dir.join("portable.flag").is_file()
-            || exe_dir.join("user-projects").is_dir();
+        let portable_flag =
+            exe_dir.join("portable.flag").is_file() || exe_dir.join("user-projects").is_dir();
 
         if portable_flag {
             let projects_dir = exe_dir.join("user-projects");
@@ -48,7 +48,6 @@ impl AppPaths {
             .map(|d| d.config_dir().to_path_buf())
             .unwrap_or_else(|| data_dir.clone());
 
-        // Prefer workspace/exe-adjacent assets-local or assets-overrides if present
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let assets_local_dir = if cwd.join("assets-local").is_dir() {
             cwd.join("assets-local")
@@ -80,8 +79,7 @@ impl AppPaths {
         fs::create_dir_all(&self.projects_dir)
             .map_err(|e| format!("Failed to create projects dir: {e}"))?;
         if let Some(p) = self.settings_path.parent() {
-            fs::create_dir_all(p)
-                .map_err(|e| format!("Failed to create config dir: {e}"))?;
+            fs::create_dir_all(p).map_err(|e| format!("Failed to create config dir: {e}"))?;
         }
         Ok(())
     }
@@ -109,18 +107,24 @@ pub fn atomic_write_string(path: &Path, content: &str) -> Result<(), String> {
     let tmp = path.with_extension("tmp");
     fs::write(&tmp, content.as_bytes())
         .map_err(|e| format!("Failed to write {}: {e}", tmp.display()))?;
-    fs::rename(&tmp, path)
-        .map_err(|e| format!("Failed to commit {}: {e}", path.display()))?;
+    fs::rename(&tmp, path).map_err(|e| format!("Failed to commit {}: {e}", path.display()))?;
     Ok(())
 }
 
-pub fn load_project_file(path: &Path) -> Result<FactoryProject, String> {
+pub fn load_project_file(path: &Path) -> Result<(FactoryProject, Option<u32>), String> {
     let raw = fs::read_to_string(path)
         .map_err(|e| format!("Failed to read project {}: {e}", path.display()))?;
-    load_project_json_str(&raw)
+    match parse_and_migrate_project(&raw) {
+        ProjectParseResult::Ok {
+            project,
+            migrated_from_version,
+        } => Ok((project, migrated_from_version)),
+        ProjectParseResult::Err { error_en, .. } => Err(error_en),
+    }
 }
 
 pub fn save_project_file(path: &Path, project: &FactoryProject) -> Result<(), String> {
-    let json = save_project_json_str(project)?;
+    let json =
+        serialize_project(project).map_err(|e| format!("Failed to serialize project: {e}"))?;
     atomic_write_string(path, &json)
 }

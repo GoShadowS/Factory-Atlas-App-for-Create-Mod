@@ -1,5 +1,6 @@
 use crate::model::{
-    ProbabilityKind, RecipeDef, RecipeIngredient, RecipeOutput, ResourceDef, ResourceKind,
+    JarImportReport, ModLoader, ProbabilityKind, RecipeDef, RecipeIngredient, RecipeOrigin,
+    RecipeOutput, RecipeSourceMeta, ResourceKind, SkippedImportDetail,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -30,18 +31,6 @@ impl Default for JarImportOptions {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct JarImportReport {
-    pub archive_name: String,
-    pub namespaces: Vec<String>,
-    pub extracted_asset_files: usize,
-    pub scanned_recipe_files: usize,
-    pub discovered_recipes: Vec<RecipeDef>,
-    pub discovered_resources: Vec<ResourceDef>,
-    pub warnings: Vec<String>,
-    pub cancelled: bool,
-}
-
 fn sanitize_zip_rel_path(name: &str) -> Option<PathBuf> {
     let mut clean = PathBuf::new();
     for comp in Path::new(name).components() {
@@ -58,25 +47,24 @@ fn sanitize_zip_rel_path(name: &str) -> Option<PathBuf> {
     }
 }
 
-fn map_create_recipe_type_to_machine(raw_type: &str) -> (&'static str, Option<u32>) {
+fn map_create_recipe_type_to_machine(raw_type: &str) -> (&'static str, Option<f64>) {
     match raw_type {
-        "create:crushing" => ("create:crushing_wheel", Some(120)),
-        "create:milling" => ("create:millstone", Some(100)),
-        "create:mixing" => ("create:mechanical_mixer", Some(100)),
-        "create:compacting" => ("create:mechanical_press", Some(80)),
-        "create:pressing" => ("create:mechanical_press", Some(60)),
-        "create:cutting" => ("create:mechanical_saw", Some(80)),
-        "create:deploying" => ("create:deployer", Some(20)),
-        "create:filling" => ("create:spout", Some(20)),
-        "create:emptying" => ("create:item_drain", Some(20)),
-        "create:splashing" => ("create:encased_fan", Some(150)),
-        "create:haunting" => ("create:encased_fan", Some(150)),
-        "create:mechanical_crafting" => ("create:mechanical_crafter", Some(60)),
+        "create:crushing" => ("create:crushing_wheel", Some(120.0)),
+        "create:milling" => ("create:millstone", Some(100.0)),
+        "create:mixing" => ("create:mechanical_mixer", Some(100.0)),
+        "create:compacting" => ("create:mechanical_press", Some(80.0)),
+        "create:pressing" => ("create:mechanical_press", Some(60.0)),
+        "create:cutting" => ("create:mechanical_saw", Some(80.0)),
+        "create:deploying" => ("create:deployer", Some(20.0)),
+        "create:filling" => ("create:spout", Some(20.0)),
+        "create:emptying" => ("create:item_drain", Some(20.0)),
+        "create:splashing" | "create:haunting" => ("create:encased_fan", Some(150.0)),
+        "create:mechanical_crafting" => ("create:mechanical_crafter", Some(60.0)),
         "minecraft:smelting" | "minecraft:blasting" | "minecraft:smoking" => {
-            ("create:encased_fan", Some(150))
+            ("create:encased_fan", Some(150.0))
         }
         "minecraft:crafting_shaped" | "minecraft:crafting_shapeless" => {
-            ("create:manual_craft", Some(20))
+            ("create:manual_craft", Some(20.0))
         }
         _ => ("create:custom_machine", None),
     }
@@ -90,6 +78,7 @@ fn parse_ingredient_val(v: &Value) -> Option<RecipeIngredient> {
             resource_id: fluid.to_owned(),
             kind: ResourceKind::Fluid,
             amount: amt,
+            tag_name: None,
         });
     }
     if let Some(fluid_tag) = obj.get("fluidTag").and_then(|f| f.as_str()) {
@@ -98,23 +87,25 @@ fn parse_ingredient_val(v: &Value) -> Option<RecipeIngredient> {
             resource_id: format!("#{fluid_tag}"),
             kind: ResourceKind::Fluid,
             amount: amt,
+            tag_name: Some(fluid_tag.to_owned()),
         });
     }
+    let tag_name = obj
+        .get("tag")
+        .and_then(|t| t.as_str())
+        .map(|s| s.to_owned());
     let item_id = obj
         .get("item")
         .or_else(|| obj.get("id"))
         .and_then(|s| s.as_str())
         .map(|s| s.to_owned())
-        .or_else(|| {
-            obj.get("tag")
-                .and_then(|t| t.as_str())
-                .map(|t| format!("#{t}"))
-        })?;
+        .or_else(|| tag_name.as_ref().map(|t| format!("#{t}")))?;
     let amt = obj.get("count").and_then(|c| c.as_f64()).unwrap_or(1.0);
     Some(RecipeIngredient {
         resource_id: item_id,
         kind: ResourceKind::Item,
         amount: amt,
+        tag_name,
     })
 }
 
@@ -128,12 +119,12 @@ fn parse_output_val(v: &Value) -> Option<RecipeOutput> {
             kind: ResourceKind::Fluid,
             amount: amt,
             chance: chance.clamp(0.0, 1.0),
-            probability_kind: if chance < 0.9999 {
-                ProbabilityKind::IndependentChance
-            } else {
-                ProbabilityKind::Exact
-            },
             weight: None,
+            probability_kind: if chance < 0.9999 {
+                ProbabilityKind::Bernoulli
+            } else {
+                ProbabilityKind::Guaranteed
+            },
         });
     }
     let item_id = obj
@@ -148,17 +139,19 @@ fn parse_output_val(v: &Value) -> Option<RecipeOutput> {
         kind: ResourceKind::Item,
         amount: amt,
         chance: chance.clamp(0.0, 1.0),
-        probability_kind: if chance < 0.9999 {
-            ProbabilityKind::IndependentChance
-        } else {
-            ProbabilityKind::Exact
-        },
         weight: None,
+        probability_kind: if chance < 0.9999 {
+            ProbabilityKind::Bernoulli
+        } else {
+            ProbabilityKind::Guaranteed
+        },
     })
 }
 
 pub fn parse_mc_recipe_json(
     recipe_id: &str,
+    mod_id: &str,
+    recipe_path: &str,
     json: &Value,
     lang_en: &HashMap<String, String>,
     lang_ru: &HashMap<String, String>,
@@ -170,8 +163,7 @@ pub fn parse_mc_recipe_json(
         .get("processingTime")
         .or_else(|| obj.get("processing_time"))
         .or_else(|| obj.get("cookingtime"))
-        .and_then(|v| v.as_u64())
-        .map(|v| v as u32)
+        .and_then(|v| v.as_f64())
         .or(default_ticks);
 
     let mut inputs: Vec<RecipeIngredient> = Vec::new();
@@ -189,7 +181,7 @@ pub fn parse_mc_recipe_json(
     } else if let Some(ing) = obj.get("ingredient").and_then(parse_ingredient_val) {
         inputs.push(ing);
     } else if let Some(key_map) = obj.get("key").and_then(|k| k.as_object()) {
-        let mut counts: HashMap<String, (ResourceKind, f64)> = HashMap::new();
+        let mut counts: HashMap<String, (ResourceKind, f64, Option<String>)> = HashMap::new();
         if let Some(pat) = obj.get("pattern").and_then(|p| p.as_array()) {
             for row in pat {
                 if let Some(rs) = row.as_str() {
@@ -202,18 +194,19 @@ pub fn parse_mc_recipe_json(
                         {
                             let e = counts
                                 .entry(ing.resource_id)
-                                .or_insert((ing.kind, 0.0));
+                                .or_insert((ing.kind, 0.0, ing.tag_name));
                             e.1 += ing.amount;
                         }
                     }
                 }
             }
         }
-        for (rid, (kind, amt)) in counts {
+        for (rid, (kind, amt, tag_name)) in counts {
             inputs.push(RecipeIngredient {
                 resource_id: rid,
                 kind,
                 amount: amt,
+                tag_name,
             });
         }
     }
@@ -234,8 +227,8 @@ pub fn parse_mc_recipe_json(
             kind: ResourceKind::Item,
             amount: cnt,
             chance: 1.0,
-            probability_kind: ProbabilityKind::Exact,
             weight: None,
+            probability_kind: ProbabilityKind::Guaranteed,
         });
     }
 
@@ -243,29 +236,38 @@ pub fn parse_mc_recipe_json(
         return None;
     }
 
-    let title_en = outputs
+    let name_en = outputs
         .first()
         .and_then(|o| lookup_lang_name(&o.resource_id, lang_en))
         .unwrap_or_else(|| recipe_id.to_owned());
-    let title_ru = outputs
+    let name_ru = outputs
         .first()
         .and_then(|o| lookup_lang_name(&o.resource_id, lang_ru))
-        .unwrap_or_else(|| title_en.clone());
+        .unwrap_or_else(|| name_en.clone());
 
     Some(RecipeDef {
         id: recipe_id.to_owned(),
+        recipe_type: rtype.to_owned(),
         machine_id: machine_id.to_owned(),
-        title_ru,
-        title_en,
+        name_ru,
+        name_en,
+        inputs,
+        outputs,
         processing_time_ticks,
         heat_requirement: obj
             .get("heatRequirement")
             .and_then(|h| h.as_str())
             .map(|s| s.to_owned()),
-        inputs,
-        outputs,
-        notes: Some(format!("Imported from recipe type {rtype}")),
-        custom: true,
+        source: RecipeSourceMeta {
+            origin: RecipeOrigin::ImportedJar,
+            mod_id: mod_id.to_owned(),
+            mod_version: "imported".to_owned(),
+            minecraft_version: "1.21.1".to_owned(),
+            loader: ModLoader::Neoforge,
+            recipe_path: Some(recipe_path.to_owned()),
+        },
+        notes_ru: Some(format!("Импортировано из рецепта {rtype}")),
+        notes_en: Some(format!("Imported from recipe type {rtype}")),
     })
 }
 
@@ -279,6 +281,7 @@ fn lookup_lang_name(id: &str, map: &HashMap<String, String>) -> Option<String> {
 
 pub fn import_mod_archive_reader<R: Read + Seek>(
     archive_name: &str,
+    archive_size_bytes: usize,
     reader: R,
     options: &JarImportOptions,
     cancel: Option<&AtomicBool>,
@@ -289,15 +292,15 @@ pub fn import_mod_archive_reader<R: Read + Seek>(
     let mut namespaces: BTreeSet<String> = BTreeSet::new();
     let mut lang_en: HashMap<String, String> = HashMap::new();
     let mut lang_ru: HashMap<String, String> = HashMap::new();
-    let mut raw_recipes: Vec<(String, Value)> = Vec::new();
-    let mut extracted_asset_files = 0usize;
+    let mut raw_recipes: Vec<(String, String, String, Value)> = Vec::new();
+    let mut extracted_textures_count = 0usize;
     let mut total_extracted_bytes = 0u64;
     let mut warnings = Vec::new();
-    let mut cancelled = false;
+    let mut skipped_details = Vec::new();
 
     for idx in 0..total {
         if cancel.is_some_and(|c| c.load(Ordering::Relaxed)) {
-            cancelled = true;
+            warnings.push("Import cancelled by user".to_owned());
             break;
         }
         if idx % 32 == 0 {
@@ -316,7 +319,12 @@ pub fn import_mod_archive_reader<R: Read + Seek>(
         }
         let name = file.name().replace('\\', "/");
         if file.size() > MAX_JAR_ENTRY_BYTES {
-            warnings.push(format!("Skipped oversized entry {name}"));
+            skipped_details.push(SkippedImportDetail {
+                path: name,
+                reason_code: "OVERSIZED".to_owned(),
+                message_ru: "Запись превышает лимит 16 МиБ".to_owned(),
+                message_en: "Entry exceeds 16 MiB limit".to_owned(),
+            });
             continue;
         }
 
@@ -360,8 +368,8 @@ pub fn import_mod_archive_reader<R: Read + Seek>(
                                 if let Some(parent) = dest.parent() {
                                     let _ = fs::create_dir_all(parent);
                                 }
-                                if fs::write(&dest, &buf).is_ok() {
-                                    extracted_asset_files += 1;
+                                if fs::write(&dest, &buf).is_ok() && tail.ends_with(".png") {
+                                    extracted_textures_count += 1;
                                 }
                             }
                         }
@@ -383,62 +391,49 @@ pub fn import_mod_archive_reader<R: Read + Seek>(
                 if (&mut file).take(MAX_JAR_ENTRY_BYTES).read_to_end(&mut buf).is_ok()
                     && let Ok(val) = serde_json::from_slice::<Value>(&buf)
                 {
-                    raw_recipes.push((recipe_id, val));
+                    raw_recipes.push((recipe_id, ns.to_owned(), name, val));
                 }
             }
         }
     }
 
-    let mut discovered_recipes = Vec::new();
-    let mut resource_ids: BTreeSet<(String, ResourceKind)> = BTreeSet::new();
-
-    for (rid, val) in &raw_recipes {
-        if let Some(rec) = parse_mc_recipe_json(rid, val, &lang_en, &lang_ru) {
-            for i in &rec.inputs {
-                if !i.resource_id.starts_with('#') {
-                    resource_ids.insert((i.resource_id.clone(), i.kind));
-                }
-            }
-            for o in &rec.outputs {
-                resource_ids.insert((o.resource_id.clone(), o.kind));
-            }
-            discovered_recipes.push(rec);
+    let mut recipes = Vec::new();
+    for (rid, ns, path, val) in &raw_recipes {
+        if let Some(rec) = parse_mc_recipe_json(rid, ns, path, val, &lang_en, &lang_ru) {
+            recipes.push(rec);
+        } else {
+            skipped_details.push(SkippedImportDetail {
+                path: path.clone(),
+                reason_code: "UNSUPPORTED_RECIPE".to_owned(),
+                message_ru: "Формат рецепта не распознан (например динамический или условие)".to_owned(),
+                message_en: "Recipe format not recognized".to_owned(),
+            });
         }
     }
-
-    let discovered_resources = resource_ids
-        .into_iter()
-        .map(|(id, kind)| {
-            let name_en = lookup_lang_name(&id, &lang_en).unwrap_or_else(|| id.clone());
-            let name_ru = lookup_lang_name(&id, &lang_ru).unwrap_or_else(|| name_en.clone());
-            ResourceDef {
-                id,
-                kind,
-                name_ru,
-                name_en,
-                color_hex: None,
-                stack_size: if kind == ResourceKind::Item {
-                    Some(64)
-                } else {
-                    None
-                },
-                custom: true,
-                visual: None,
-            }
-        })
-        .collect();
 
     on_progress(total, total, "Archive scan complete");
 
+    let primary_ns = namespaces
+        .iter()
+        .find(|n| *n != "minecraft")
+        .cloned()
+        .unwrap_or_else(|| "unknown".to_owned());
+
     Ok(JarImportReport {
-        archive_name: archive_name.to_owned(),
-        namespaces: namespaces.into_iter().collect(),
-        extracted_asset_files,
-        scanned_recipe_files: raw_recipes.len(),
-        discovered_recipes,
-        discovered_resources,
+        file_name: archive_name.to_owned(),
+        detected_mod_id: primary_ns.clone(),
+        detected_mod_name: primary_ns,
+        detected_mod_version: "detected".to_owned(),
+        detected_loader: "NeoForge/Forge/Fabric".to_owned(),
+        detected_minecraft_version: "1.21.1".to_owned(),
+        archive_size_bytes,
+        entries_scanned: total,
+        imported_count: recipes.len(),
+        skipped_count: skipped_details.len(),
+        extracted_textures_count,
+        recipes,
+        skipped_details,
         warnings,
-        cancelled,
     })
 }
 
@@ -448,10 +443,11 @@ pub fn import_mod_archive_file(
     cancel: Option<&AtomicBool>,
     on_progress: impl FnMut(usize, usize, &str),
 ) -> Result<JarImportReport, String> {
+    let size = fs::metadata(path).map(|m| m.len() as usize).unwrap_or(0);
     let file = fs::File::open(path).map_err(|e| format!("Cannot open {}: {e}", path.display()))?;
     let name = path
         .file_name()
         .and_then(|s| s.to_str())
         .unwrap_or("archive.jar");
-    import_mod_archive_reader(name, file, options, cancel, on_progress)
+    import_mod_archive_reader(name, size, file, options, cancel, on_progress)
 }

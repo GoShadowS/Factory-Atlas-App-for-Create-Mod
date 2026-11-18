@@ -36,7 +36,7 @@ pub fn export_summary_markdown(
     let mut out = String::new();
     match locale {
         Locale::Ru => {
-            let _ = writeln!(out, "# {}\n", project.meta.name);
+            let _ = writeln!(out, "# {}\n", project.name);
             let _ = writeln!(
                 out,
                 "- Узлов: **{}**, связей: **{}**, компонент: **{}**",
@@ -52,7 +52,7 @@ pub fn export_summary_markdown(
             let _ = writeln!(out, "|---|---:|---:|---:|---:|");
         }
         Locale::En => {
-            let _ = writeln!(out, "# {}\n", project.meta.name);
+            let _ = writeln!(out, "# {}\n", project.name);
             let _ = writeln!(
                 out,
                 "- Nodes: **{}**, edges: **{}**, components: **{}**",

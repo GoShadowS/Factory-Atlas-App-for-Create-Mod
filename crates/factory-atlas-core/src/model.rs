@@ -17,6 +17,37 @@ pub enum ThemeMode {
     Light,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppSettings {
+    #[serde(default)]
+    pub locale: Locale,
+    #[serde(default)]
+    pub theme: ThemeMode,
+    #[serde(default = "default_rpm_setting")]
+    pub default_rpm: f64,
+    #[serde(default)]
+    pub recent_projects: Vec<String>,
+    #[serde(default)]
+    pub local_assets_dir: Option<String>,
+}
+
+fn default_rpm_setting() -> f64 {
+    64.0
+}
+
+impl Default for AppSettings {
+    fn default() -> Self {
+        Self {
+            locale: Locale::Ru,
+            theme: ThemeMode::Dark,
+            default_rpm: 64.0,
+            recent_projects: Vec::new(),
+            local_assets_dir: None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ResourceKind {

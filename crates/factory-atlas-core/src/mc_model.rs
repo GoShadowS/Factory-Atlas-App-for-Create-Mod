@@ -1,4 +1,4 @@
-use crate::model::{ModelKind, VisualEntrySummary};
+use crate::model::{ModelSupportStatus, VisualEntrySummary, VisualIndexData};
 use crate::visual_matcher::normalize_visual_query;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -93,7 +93,7 @@ pub struct ResolvedModelPart {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResolvedMcAsset {
-    pub kind: ModelKind,
+    pub kind: ModelSupportStatus,
     pub parts: Vec<ResolvedModelPart>,
     pub fallback_texture: Option<String>,
     pub warning: Option<String>,
@@ -403,8 +403,14 @@ pub fn resolve_model_part<S: AssetSource>(
             break;
         }
         if let Some(json) = source.read_json(&rel) {
-            if json.get("loader").and_then(|l| l.as_str()).is_some_and(|l| l.contains("obj"))
-                || json.get("model").and_then(|m| m.as_str()).is_some_and(|m| m.ends_with(".obj"))
+            if json
+                .get("loader")
+                .and_then(|l| l.as_str())
+                .is_some_and(|l| l.contains("obj"))
+                || json
+                    .get("model")
+                    .and_then(|m| m.as_str())
+                    .is_some_and(|m| m.ends_with(".obj"))
             {
                 unsupported_reason = Some("OBJ model loader requires external mesh".to_owned());
             }
@@ -421,7 +427,6 @@ pub fn resolve_model_part<S: AssetSource>(
     let mut textures: HashMap<String, String> = HashMap::new();
     let mut elements: Vec<ModelElement> = vanilla_elements.unwrap_or_default();
 
-    // Apply root -> leaf
     for (_, json) in chain.iter().rev() {
         if let Some(tobj) = json.get("textures").and_then(|t| t.as_object()) {
             for (k, v) in tobj {
@@ -438,7 +443,6 @@ pub fn resolve_model_part<S: AssetSource>(
         }
     }
 
-    // Resolve face texture variables to relative PNG paths
     let resolved_textures: HashMap<String, String> = textures
         .iter()
         .filter_map(|(k, v)| {
@@ -522,7 +526,7 @@ pub fn resolve_visual_entry_asset<S: AssetSource>(
         let elem_count: usize = parts.iter().map(|p| p.elements.len()).sum();
         if elem_count > 0 {
             return ResolvedMcAsset {
-                kind: ModelKind::JsonElements3d,
+                kind: ModelSupportStatus::ThreeDJsonElements,
                 parts,
                 fallback_texture: entry.texture_path.clone(),
                 warning: None,
@@ -533,6 +537,7 @@ pub fn resolve_visual_entry_asset<S: AssetSource>(
     if let Some(mref) = entry
         .model_ref
         .as_deref()
+        .or(entry.world_model_ref.as_deref())
         .or(entry.world_model_path.as_deref())
         .or(entry.model_path.as_deref())
     {
@@ -548,7 +553,7 @@ pub fn resolve_visual_entry_asset<S: AssetSource>(
         );
         if let Some(reason) = part.unsupported_reason.clone() {
             return ResolvedMcAsset {
-                kind: ModelKind::UnsupportedObj,
+                kind: ModelSupportStatus::UnsupportedObj,
                 parts: vec![part],
                 fallback_texture: entry.texture_path.clone(),
                 warning: Some(reason),
@@ -556,7 +561,7 @@ pub fn resolve_visual_entry_asset<S: AssetSource>(
         }
         if !part.elements.is_empty() {
             return ResolvedMcAsset {
-                kind: ModelKind::JsonElements3d,
+                kind: ModelSupportStatus::ThreeDJsonElements,
                 parts: vec![part],
                 fallback_texture: entry.texture_path.clone(),
                 warning: None,
@@ -564,7 +569,7 @@ pub fn resolve_visual_entry_asset<S: AssetSource>(
         }
         if part.is_2d_item {
             return ResolvedMcAsset {
-                kind: ModelKind::ItemGenerated2d,
+                kind: ModelSupportStatus::TwoDItemGenerated,
                 parts: vec![part],
                 fallback_texture: entry.texture_path.clone(),
                 warning: None,
@@ -574,7 +579,7 @@ pub fn resolve_visual_entry_asset<S: AssetSource>(
 
     if entry.texture_path.is_some() {
         return ResolvedMcAsset {
-            kind: ModelKind::ItemGenerated2d,
+            kind: ModelSupportStatus::TwoDItemGenerated,
             parts: Vec::new(),
             fallback_texture: entry.texture_path.clone(),
             warning: None,
@@ -582,10 +587,10 @@ pub fn resolve_visual_entry_asset<S: AssetSource>(
     }
 
     ResolvedMcAsset {
-        kind: if entry.model_kind == ModelKind::None {
-            ModelKind::ProceduralOrBlockEntity
+        kind: if entry.model_support == ModelSupportStatus::None {
+            ModelSupportStatus::ProceduralOrBlockEntity
         } else {
-            entry.model_kind
+            entry.model_support
         },
         parts: Vec::new(),
         fallback_texture: None,
@@ -649,18 +654,12 @@ impl BoundedModelCache {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct RawVisualIndexFile {
-    #[serde(default)]
-    entries: Vec<VisualEntrySummary>,
-}
-
 /// Loads `visual-index.json` if present, or returns empty list cleanly when offline/without assets.
 pub fn load_visual_index_file(path: &Path) -> Vec<VisualEntrySummary> {
     let Ok(bytes) = fs::read_to_string(path) else {
         return Vec::new();
     };
-    if let Ok(wrapped) = serde_json::from_str::<RawVisualIndexFile>(&bytes)
+    if let Ok(wrapped) = serde_json::from_str::<VisualIndexData>(&bytes)
         && !wrapped.entries.is_empty()
     {
         return wrapped.entries;
@@ -668,9 +667,8 @@ pub fn load_visual_index_file(path: &Path) -> Vec<VisualEntrySummary> {
     serde_json::from_str::<Vec<VisualEntrySummary>>(&bytes).unwrap_or_default()
 }
 
-/// Scans an arbitrary local directory containing `<namespace>/{models,textures,blockstates,lang}`
-/// (like `assets-local/upstream-originals` or `assets-overrides`) into `VisualEntrySummary` rows.
-/// Read-only index only — never creates factory items or recipes.
+/// Scans a local directory containing `<namespace>/{models,textures,blockstates,lang}`
+/// into `VisualEntrySummary` rows. Read-only index only — never creates factory items or recipes.
 pub fn build_local_visual_index_from_dir(root_dir: &Path) -> Vec<VisualEntrySummary> {
     let Ok(read_ns) = fs::read_dir(root_dir) else {
         return Vec::new();
@@ -725,6 +723,7 @@ pub fn build_local_visual_index_from_dir(root_dir: &Path) -> Vec<VisualEntrySumm
                         id: id.clone(),
                         namespace: ns.clone(),
                         path_id: stem.clone(),
+                        kind: "item".to_owned(),
                         name_en: name_en.clone(),
                         name_ru: name_ru.clone(),
                         normalized_key: normalize_visual_query(&id),
@@ -733,36 +732,49 @@ pub fn build_local_visual_index_from_dir(root_dir: &Path) -> Vec<VisualEntrySumm
                             .as_deref()
                             .map(normalize_visual_query)
                             .unwrap_or_default(),
-                        model_path: None,
-                        world_model_path: None,
+                        source_repo: "local-scan".to_owned(),
+                        source_branch: "local".to_owned(),
+                        source_commit: "local".to_owned(),
+                        mod_version: "local".to_owned(),
+                        minecraft_version: "1.21.1".to_owned(),
+                        license: "Local User Override / Inspection".to_owned(),
                         blockstate_path: None,
-                        texture_path: None,
                         model_ref: None,
+                        model_path: None,
+                        world_model_ref: None,
+                        world_model_path: None,
+                        texture_path: None,
+                        model_support: ModelSupportStatus::None,
                         has_model_3d: false,
-                        model_kind: ModelKind::None,
+                        has_texture_2d: false,
                     }
                 });
 
                 let full_rel = format!("{ns}/{kind_dir}/{rel_sub}");
                 match kind_dir {
                     "models/item" => {
-                        e.model_path = Some(full_rel.clone());
+                        e.model_path = Some(full_rel);
                         if e.model_ref.is_none() {
                             e.model_ref = Some(format!("{ns}:item/{stem}"));
                         }
                     }
                     "models/block" => {
+                        e.kind = "block".to_owned();
                         e.world_model_path = Some(full_rel);
+                        e.world_model_ref = Some(format!("{ns}:block/{stem}"));
                         e.model_ref = Some(format!("{ns}:block/{stem}"));
                     }
                     "blockstates" => {
+                        e.kind = "block".to_owned();
                         e.blockstate_path = Some(full_rel);
                     }
                     "textures/item" => {
                         e.texture_path = Some(full_rel);
+                        e.has_texture_2d = true;
                     }
                     "textures/block" if e.texture_path.is_none() => {
                         e.texture_path = Some(full_rel);
+                        e.has_texture_2d = true;
                     }
                     _ => {}
                 }
@@ -771,8 +783,8 @@ pub fn build_local_visual_index_from_dir(root_dir: &Path) -> Vec<VisualEntrySumm
 
         for mut entry in seen_ids.into_values() {
             let resolved = resolve_visual_entry_asset(&entry, &source);
-            entry.model_kind = resolved.kind;
-            entry.has_model_3d = resolved.kind == ModelKind::JsonElements3d;
+            entry.model_support = resolved.kind;
+            entry.has_model_3d = resolved.kind == ModelSupportStatus::ThreeDJsonElements;
             if entry.texture_path.is_none() {
                 entry.texture_path = resolved
                     .parts
@@ -780,6 +792,7 @@ pub fn build_local_visual_index_from_dir(root_dir: &Path) -> Vec<VisualEntrySumm
                     .flat_map(|p| p.textures.values())
                     .find(|tex| source.exists(tex))
                     .cloned();
+                entry.has_texture_2d = entry.texture_path.is_some();
             }
             entries.push(entry);
         }
