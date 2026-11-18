@@ -261,7 +261,12 @@ fn solver_detects_unit_mismatch_cycles_and_caches_components() {
 
 #[test]
 fn visual_matcher_five_tiers_and_no_auto_creation() {
-    let mut cog = make_visual_entry("create:cogwheel", "cogwheel", "Cogwheel", Some("Шестерёнка"));
+    let mut cog = make_visual_entry(
+        "create:cogwheel",
+        "cogwheel",
+        "Cogwheel",
+        Some("Шестерёнка"),
+    );
     cog.model_path = Some("create/models/item/cogwheel.json".into());
     cog.world_model_path = Some("create/models/block/cogwheel.json".into());
     cog.blockstate_path = Some("create/blockstates/cogwheel.json".into());
@@ -373,7 +378,10 @@ fn nbt_schematic_parses_gzipped_structure() {
     let mut pal0 = BTreeMap::new();
     pal0.insert("Name".into(), NbtTag::String("create:cogwheel".into()));
     let mut pal1 = BTreeMap::new();
-    pal1.insert("Name".into(), NbtTag::String("create:andesite_casing".into()));
+    pal1.insert(
+        "Name".into(),
+        NbtTag::String("create:andesite_casing".into()),
+    );
 
     let mut b0 = BTreeMap::new();
     b0.insert("state".into(), NbtTag::Int(0));

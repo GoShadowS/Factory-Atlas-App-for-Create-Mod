@@ -423,7 +423,12 @@ fn solve_component(
         }
         let names = c
             .iter()
-            .map(|id| node_by_id.get(id.as_str()).map(|n| n.title.as_str()).unwrap_or(id.as_str()))
+            .map(|id| {
+                node_by_id
+                    .get(id.as_str())
+                    .map(|n| n.title.as_str())
+                    .unwrap_or(id.as_str())
+            })
             .collect::<Vec<_>>()
             .join(" -> ");
         warnings.push(SolverWarning {
@@ -446,8 +451,7 @@ fn solve_component(
     }
 
     // Topological order on acyclic subset
-    let mut in_deg: HashMap<String, usize> =
-        nodes.iter().map(|n| (n.id.clone(), 0usize)).collect();
+    let mut in_deg: HashMap<String, usize> = nodes.iter().map(|n| (n.id.clone(), 0usize)).collect();
     for e in &compat_edges {
         if !cycle_nodes.contains(&e.from_node_id)
             && !cycle_nodes.contains(&e.to_node_id)
@@ -498,7 +502,10 @@ fn solve_component(
 
     for id in topo_order.iter().rev() {
         let node = node_by_id[id.as_str()];
-        let out_edges = outgoing_by_node.get(id.as_str()).map(Vec::as_slice).unwrap_or(&[]);
+        let out_edges = outgoing_by_node
+            .get(id.as_str())
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
 
         if node.kind == NodeKind::Target {
             let tgt_rate = node.target_rate_per_min.unwrap_or(0.0).max(0.0);
@@ -508,7 +515,10 @@ fn solve_component(
                     .or_default()
                     .insert(rid.to_owned(), tgt_rate);
             }
-            let in_edges = incoming_by_node.get(id.as_str()).map(Vec::as_slice).unwrap_or(&[]);
+            let in_edges = incoming_by_node
+                .get(id.as_str())
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
             if in_edges.is_empty() && tgt_rate > 0.0 {
                 warnings.push(SolverWarning {
                     id: format!("w-disc-{}", node.id),
@@ -562,8 +572,10 @@ fn solve_component(
                     if d <= 0.0 {
                         continue;
                     }
-                    if let Some(out_def) =
-                        rec.outputs.iter().find(|o| o.resource_id == out_e.resource_id)
+                    if let Some(out_def) = rec
+                        .outputs
+                        .iter()
+                        .find(|o| o.resource_id == out_e.resource_id)
                     {
                         let p = if out_def.probability_kind == ProbabilityKind::Weighted
                             && total_weight > 0.0
@@ -624,8 +636,14 @@ fn solve_component(
 
     for id in &topo_order {
         let node = node_by_id[id.as_str()];
-        let out_edges = outgoing_by_node.get(id.as_str()).map(Vec::as_slice).unwrap_or(&[]);
-        let in_edges = incoming_by_node.get(id.as_str()).map(Vec::as_slice).unwrap_or(&[]);
+        let out_edges = outgoing_by_node
+            .get(id.as_str())
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let in_edges = incoming_by_node
+            .get(id.as_str())
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
 
         let mut node_warnings: Vec<String> = Vec::new();
         let mut inputs_calc: Vec<NodeFlowLine> = Vec::new();
@@ -962,7 +980,9 @@ fn solve_component(
         }
 
         let effective_crafts = if req_crafts > 0.0 {
-            req_crafts.min(max_crafts_by_input).min(max_crafts_by_machines)
+            req_crafts
+                .min(max_crafts_by_input)
+                .min(max_crafts_by_machines)
         } else {
             max_crafts_by_input.min(max_crafts_by_machines)
         };

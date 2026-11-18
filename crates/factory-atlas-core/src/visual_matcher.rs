@@ -194,10 +194,7 @@ pub fn match_visual_resources(
         for tok in &tokens {
             if hay_ru.contains(tok) || hay_en.contains(tok) || hay_id.contains(tok) {
                 hits += 1;
-                if hay_ru.starts_with(tok)
-                    || hay_en.starts_with(tok)
-                    || e.path_id.starts_with(tok)
-                {
+                if hay_ru.starts_with(tok) || hay_en.starts_with(tok) || e.path_id.starts_with(tok) {
                     bonus += 2;
                 }
             }
