@@ -526,15 +526,16 @@ impl FactoryAtlasApp {
             .show(ctx, |ui| {
                 ui.label("Сохранить изменения перед продолжением?");
                 ui.horizontal(|ui| {
-                    if ui.button("Сохранить").clicked() && self.save_current() {
-                        if let Some(action) = self.pending_action.take() {
-                            self.apply_action(action);
-                        }
+                    if ui.button("Сохранить").clicked()
+                        && self.save_current()
+                        && let Some(action) = self.pending_action.take()
+                    {
+                        self.apply_action(action);
                     }
-                    if ui.button("Продолжить без сохранения").clicked() {
-                        if let Some(action) = self.pending_action.take() {
-                            self.apply_action(action);
-                        }
+                    if ui.button("Продолжить без сохранения").clicked()
+                        && let Some(action) = self.pending_action.take()
+                    {
+                        self.apply_action(action);
                     }
                     if ui.button("Отмена").clicked() {
                         self.pending_action = None;
