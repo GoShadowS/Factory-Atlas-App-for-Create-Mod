@@ -233,23 +233,27 @@ fn migrate_v1_to_v2(v1: &Map<String, Value>) -> Value {
                 {
                     obj.insert("title".to_owned(), lbl);
                 }
-                let kind_str = obj.get("kind").and_then(|k| k.as_str()).unwrap_or("");
-                if kind_str == "source"
+                let is_source = obj.get("kind").and_then(|k| k.as_str()) == Some("source");
+                let is_target = obj.get("kind").and_then(|k| k.as_str()) == Some("target");
+                if is_source
                     && !obj.contains_key("sourceRatePerMin")
                     && let Some(r) = obj.get("rate").cloned()
                 {
                     obj.insert("sourceRatePerMin".to_owned(), r);
                 }
-                if kind_str == "target"
+                if is_target
                     && !obj.contains_key("targetRatePerMin")
                     && let Some(r) = obj.get("rate").cloned()
                 {
                     obj.insert("targetRatePerMin".to_owned(), r);
                 }
                 if !obj.contains_key("resourceKind")
-                    && let Some(unit) = obj.get("unit").and_then(|u| u.as_str())
+                    && let Some(unit) = obj
+                        .get("unit")
+                        .and_then(|u| u.as_str())
+                        .map(str::to_lowercase)
                 {
-                    let rk = if unit.to_lowercase().contains("mb") {
+                    let rk = if unit.contains("mb") {
                         ResourceKind::Fluid
                     } else {
                         ResourceKind::Item
@@ -296,9 +300,12 @@ fn migrate_v1_to_v2(v1: &Map<String, Value>) -> Value {
                     obj.insert("toNodeId".to_owned(), t);
                 }
                 if !obj.contains_key("resourceKind")
-                    && let Some(unit) = obj.get("unit").and_then(|u| u.as_str())
+                    && let Some(unit) = obj
+                        .get("unit")
+                        .and_then(|u| u.as_str())
+                        .map(str::to_lowercase)
                 {
-                    let rk = if unit.to_lowercase().contains("mb") {
+                    let rk = if unit.contains("mb") {
                         ResourceKind::Fluid
                     } else {
                         ResourceKind::Item
