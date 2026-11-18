@@ -317,7 +317,10 @@ pub fn import_mod_archive_reader<R: Read + Seek>(
         if file.is_dir() {
             continue;
         }
-        let name = file.name().replace('\\', "/");
+        let Ok(raw_name) = file.name() else {
+            continue;
+        };
+        let name = raw_name.replace('\\', "/");
         if file.size() > MAX_JAR_ENTRY_BYTES {
             skipped_details.push(SkippedImportDetail {
                 path: name,
