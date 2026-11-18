@@ -6,8 +6,13 @@ coverage/
 .vite/
 *.tsbuildinfo
 
-# Local Tauri / Rust build artifacts
+# Local Rust / build artifacts
+target/
 src-tauri/target/
+dist-windows-artifacts/
+dist-portable/
+*.exe
+*.zip
 
 # Local temporary upstream original textures (NOT for GitHub / public release!)
 assets-local/

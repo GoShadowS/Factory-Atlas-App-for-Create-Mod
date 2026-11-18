@@ -8,6 +8,32 @@ on:
   workflow_dispatch:
 
 jobs:
+  rust-core:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Check formatting
+        shell: bash
+        run: cargo fmt --all -- --check || (cargo fmt --all && git diff && exit 1)
+      - name: Run Clippy (-D warnings)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Run Rust core tests
+        run: cargo test --workspace
+      - name: Verify no copyrighted upstream textures tracked in git
+        shell: bash
+        run: |
+          if git ls-files | grep -E '^(assets-local/|user-projects/)'; then
+            echo "ERROR: Local upstream textures or user projects must never be committed!"
+            exit 1
+          fi
+
   test-and-build:
     runs-on: ubuntu-latest
     steps:
