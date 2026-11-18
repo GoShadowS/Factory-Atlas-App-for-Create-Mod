@@ -286,7 +286,7 @@ fn visual_matcher_five_tiers_and_no_auto_creation() {
     let r3 = match_visual_resources("Шестерёнка", &entries, 8);
     assert_eq!(r3.status, VisualMatchStatus::Unique);
 
-    let r4 = match_visual_resources("cogwheel", &entries, 8);
+    let r4 = match_visual_resources("cog", &entries, 8);
     assert_eq!(r4.status, VisualMatchStatus::Ambiguous);
     assert_eq!(r4.candidates.len(), 2);
 

@@ -91,14 +91,13 @@ pub fn match_visual_resources(
                 e.blockstate_path.as_deref(),
                 e.model_ref.as_deref(),
                 e.world_model_ref.as_deref(),
-                Some(e.path_id.as_str()),
             ]
             .into_iter()
             .flatten()
             .any(|p| {
                 let lp = p.to_lowercase();
                 let np = lp.trim_end_matches(".json").trim_end_matches(".png");
-                np == clean_path || np.ends_with(&format!("/{clean_path}"))
+                clean_path.contains('/') && (np == clean_path || np.ends_with(&format!("/{clean_path}")))
             })
         })
         .cloned()

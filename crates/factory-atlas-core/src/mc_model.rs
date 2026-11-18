@@ -398,7 +398,8 @@ pub fn resolve_model_part<S: AssetSource>(
             is_2d_item = true;
             break;
         }
-        if let Some(prim) = vanilla_primitive_elements(&rel) {
+        let clean_no_ext = rel.trim_end_matches(".json");
+        if let Some(prim) = vanilla_primitive_elements(clean_no_ext) {
             vanilla_elements = Some(prim);
             break;
         }
