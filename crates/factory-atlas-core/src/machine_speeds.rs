@@ -159,7 +159,10 @@ pub fn compute_machine_throughput(
             && mrate.is_finite()
             && mrate > 0.0
         {
-            let rpm_eff = rpm.or_else(|| machine.and_then(|m| m.default_rpm)).unwrap_or(0.0).abs();
+            let rpm_eff = rpm
+                .or_else(|| machine.and_then(|m| m.default_rpm))
+                .unwrap_or(0.0)
+                .abs();
             let su = machine
                 .and_then(|m| m.stress_impact_su)
                 .map(|s| s * rpm_eff);

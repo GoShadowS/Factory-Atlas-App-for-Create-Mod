@@ -296,7 +296,10 @@ fn check_edge_compatibility(
     } else if matches!(from.kind, NodeKind::Recipe | NodeKind::Machine)
         && let Some(rid) = from.recipe_id.as_deref()
         && let Some(rec) = catalog.recipes_by_id.get(rid)
-        && let Some(out) = rec.outputs.iter().find(|o| o.resource_id == edge.resource_id)
+        && let Some(out) = rec
+            .outputs
+            .iter()
+            .find(|o| o.resource_id == edge.resource_id)
     {
         from_kind = out.kind;
     }
@@ -311,7 +314,10 @@ fn check_edge_compatibility(
     } else if matches!(to.kind, NodeKind::Recipe | NodeKind::Machine)
         && let Some(rid) = to.recipe_id.as_deref()
         && let Some(rec) = catalog.recipes_by_id.get(rid)
-        && let Some(inp) = rec.inputs.iter().find(|i| i.resource_id == edge.resource_id)
+        && let Some(inp) = rec
+            .inputs
+            .iter()
+            .find(|i| i.resource_id == edge.resource_id)
     {
         to_kind = inp.kind;
     }

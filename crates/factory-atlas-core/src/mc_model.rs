@@ -344,10 +344,7 @@ fn parse_elements(val: &Value) -> Vec<ModelElement> {
                     .and_then(|t| t.as_str())
                     .unwrap_or("#missing")
                     .to_owned();
-                let rot = fmap
-                    .get("rotation")
-                    .and_then(|r| r.as_f64())
-                    .unwrap_or(0.0) as f32;
+                let rot = fmap.get("rotation").and_then(|r| r.as_f64()).unwrap_or(0.0) as f32;
                 faces.insert(
                     dir,
                     ModelFace {

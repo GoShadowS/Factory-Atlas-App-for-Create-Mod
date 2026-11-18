@@ -350,7 +350,8 @@ pub fn import_mod_archive_reader<R: Read + Seek>(
 
                 if is_wanted_asset {
                     let mut buf = Vec::new();
-                    if (&mut file).take(MAX_JAR_ENTRY_BYTES).read_to_end(&mut buf).is_ok() {
+                    let mut limited = (&mut file).take(MAX_JAR_ENTRY_BYTES);
+                    if limited.read_to_end(&mut buf).is_ok() {
                         if sub == "lang" && tail == "en_us.json" {
                             if let Ok(m) = serde_json::from_slice::<HashMap<String, String>>(&buf) {
                                 lang_en.extend(m);
@@ -396,7 +397,8 @@ pub fn import_mod_archive_reader<R: Read + Seek>(
                 let stem = parts[2].trim_end_matches(".json");
                 let recipe_id = format!("{ns}:{stem}");
                 let mut buf = Vec::new();
-                if (&mut file).take(MAX_JAR_ENTRY_BYTES).read_to_end(&mut buf).is_ok()
+                let mut limited = (&mut file).take(MAX_JAR_ENTRY_BYTES);
+                if limited.read_to_end(&mut buf).is_ok()
                     && let Ok(val) = serde_json::from_slice::<Value>(&buf)
                 {
                     raw_recipes.push((recipe_id, ns.to_owned(), name, val));
