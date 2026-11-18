@@ -326,5 +326,5 @@ fn migrate_v1_to_v2(v1: &Map<String, Value>) -> Value {
         out.insert("edges".to_owned(), Value::Array(mapped));
     }
 
-    out
+    Value::Object(out)
 }
