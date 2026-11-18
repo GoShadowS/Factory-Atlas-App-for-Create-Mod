@@ -16,6 +16,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 
 pub type WakeupFn = Arc<dyn Fn() + Send + Sync>;
+type CancelList = Arc<Mutex<Vec<(u64, Arc<AtomicBool>)>>>;
 
 #[derive(Debug, Clone)]
 pub enum BackgroundJob {
@@ -111,7 +112,7 @@ pub struct WorkerPool {
     queue: Arc<(Mutex<SharedQueue>, Condvar)>,
     out_tx: Arc<Mutex<VecDeque<BackgroundOutput>>>,
     next_id: AtomicU64,
-    active_cancels: Arc<Mutex<Vec<(u64, Arc<AtomicBool>)>>>,
+    active_cancels: CancelList,
     wakeup: Arc<Mutex<Option<WakeupFn>>>,
     threads: Vec<JoinHandle<()>>,
 }
@@ -131,7 +132,7 @@ impl WorkerPool {
             Condvar::new(),
         ));
         let out_tx = Arc::new(Mutex::new(VecDeque::with_capacity(64)));
-        let active_cancels = Arc::new(Mutex::new(Vec::new()));
+        let active_cancels: CancelList = Arc::new(Mutex::new(Vec::new()));
         let wakeup: Arc<Mutex<Option<WakeupFn>>> = Arc::new(Mutex::new(None));
 
         let mut threads = Vec::with_capacity(workers);

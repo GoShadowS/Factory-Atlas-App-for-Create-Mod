@@ -118,7 +118,7 @@ pub fn load_project_file(path: &Path) -> Result<(FactoryProject, Option<u32>), S
         ProjectParseResult::Ok {
             project,
             migrated_from_version,
-        } => Ok((project, migrated_from_version)),
+        } => Ok((*project, migrated_from_version)),
         ProjectParseResult::Err { error_en, .. } => Err(error_en),
     }
 }

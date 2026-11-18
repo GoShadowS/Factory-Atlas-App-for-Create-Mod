@@ -72,7 +72,7 @@ pub fn create_empty_project(name: impl Into<String>) -> FactoryProject {
 #[derive(Debug, Clone)]
 pub enum ProjectParseResult {
     Ok {
-        project: FactoryProject,
+        project: Box<FactoryProject>,
         migrated_from_version: Option<u32>,
     },
     Err {
@@ -205,7 +205,7 @@ pub fn parse_and_migrate_project(raw_json: &str) -> ProjectParseResult {
     };
 
     ProjectParseResult::Ok {
-        project,
+        project: Box::new(project),
         migrated_from_version: migrated_from,
     }
 }
