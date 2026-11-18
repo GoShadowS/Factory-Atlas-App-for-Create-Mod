@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/factory-atlas-core",
+]
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+rust-version = "1.88"
+version = "0.2.0"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+strip = "symbols"

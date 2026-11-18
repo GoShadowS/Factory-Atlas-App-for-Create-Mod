@@ -56,14 +56,15 @@ jobs:
             Copy-Item "assets-overrides/README.txt" "$portRoot/assets-overrides/README.txt"
           }
           "portable-mode" | Out-File -Encoding ascii "$portRoot/portable.flag"
-          @"
-Factory Atlas $ver — Портативная версия (Windows x64)
-======================================================
-1. Распакуйте весь архив в любую удобную папку (например, D:\Apps\FactoryAtlas).
-2. Запустите factory-atlas.exe (установка и права администратора не требуются).
-3. Все проекты, автосохранение, кэш WebView2 и пользовательские PNG-текстуры
-   сохраняются строго рядом в подпапке .\data\ и не смешиваются с установленной версией.
-"@ | Out-File -Encoding utf8 "$portRoot/PORTABLE-README.txt"
+          $readmeLines = @(
+            "Factory Atlas $ver — Портативная версия (Windows x64)"
+            "======================================================"
+            "1. Распакуйте весь архив в любую удобную папку (например, D:\Apps\FactoryAtlas)."
+            "2. Запустите factory-atlas.exe (установка и права администратора не требуются)."
+            "3. Все проекты, автосохранение и пользовательские PNG-текстуры"
+            "   сохраняются строго рядом в подпапке .\user-projects\ и не смешиваются с установленной версией."
+          )
+          ($readmeLines -join "`r`n") | Out-File -Encoding utf8 "$portRoot/PORTABLE-README.txt"
 
           $zipPath = "$outDir/Factory-Atlas-$ver-win64-portable.zip"
           Compress-Archive -Path "$portRoot/*" -DestinationPath $zipPath -Force
