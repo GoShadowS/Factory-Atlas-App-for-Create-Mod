@@ -19,13 +19,36 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - name: Run Clippy (-D warnings)
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo clippy --workspace --all-targets -- -D warnings 2>&1 | tee "$RUNNER_TEMP/clippy.log" || {
+            grep -E "(error|warning:|--> )" "$RUNNER_TEMP/clippy.log" | head -n 10 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            exit 1
+          }
+      - name: Run Rust core tests
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test --workspace 2>&1 | tee "$RUNNER_TEMP/test.log" || {
+            grep -E "(FAILED|error|panicked at|test result:)" "$RUNNER_TEMP/test.log" | head -n 10 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            exit 1
+          }
       - name: Check formatting
         shell: bash
-        run: cargo fmt --all -- --check || (cargo fmt --all && git diff && exit 1)
-      - name: Run Clippy (-D warnings)
-        run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Run Rust core tests
-        run: cargo test --workspace
+        run: |
+          if ! cargo fmt --all -- --check > "$RUNNER_TEMP/fmt.log" 2>&1; then
+            grep -E "^Diff in " "$RUNNER_TEMP/fmt.log" | head -n 10 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+            cat "$RUNNER_TEMP/fmt.log"
+            exit 1
+          fi
       - name: Verify no copyrighted upstream textures tracked in git
         shell: bash
         run: |

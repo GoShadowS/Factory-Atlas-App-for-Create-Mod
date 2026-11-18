@@ -552,9 +552,12 @@ fn solve_component(
                     if d <= 0.0 {
                         continue;
                     }
-                    if let Some(out_def) = rec.outputs.iter().find(|o| o.resource_id == out_e.resource_id)
+                    if let Some(out_def) =
+                        rec.outputs.iter().find(|o| o.resource_id == out_e.resource_id)
                     {
-                        let p = if out_def.probability_kind == ProbabilityKind::Weighted && total_weight > 0.0 {
+                        let p = if out_def.probability_kind == ProbabilityKind::Weighted
+                            && total_weight > 0.0
+                        {
                             out_def.weight.unwrap_or(1.0) / total_weight
                         } else {
                             out_def.chance

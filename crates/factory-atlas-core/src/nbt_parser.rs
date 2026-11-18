@@ -319,7 +319,9 @@ pub fn parse_nbt_schematic_bytes(raw: &[u8]) -> Result<ParsedNbtSchematic, Strin
     let raw_blocks = root
         .get("blocks")
         .and_then(|b| b.as_list())
-        .ok_or_else(|| "NBT file does not contain a 'blocks' list (unsupported schematic flavor)".to_owned())?;
+        .ok_or_else(|| {
+            "NBT file does not contain a 'blocks' list (unsupported schematic flavor)".to_owned()
+        })?;
 
     let mut blocks: Vec<SchematicBlockPlacement> = Vec::new();
     let mut counts: HashMap<String, usize> = HashMap::new();
@@ -343,7 +345,10 @@ pub fn parse_nbt_schematic_bytes(raw: &[u8]) -> Result<ParsedNbtSchematic, Strin
             .get(state_idx)
             .map(|p| p.block_id.clone())
             .unwrap_or_else(|| "minecraft:air".to_owned());
-        if block_id == "minecraft:air" || block_id == "minecraft:void_air" || block_id == "minecraft:cave_air" {
+        if block_id == "minecraft:air"
+            || block_id == "minecraft:void_air"
+            || block_id == "minecraft:cave_air"
+        {
             continue;
         }
         let pos = bmap

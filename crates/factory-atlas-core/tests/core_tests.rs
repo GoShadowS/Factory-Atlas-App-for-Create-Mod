@@ -1,4 +1,6 @@
-use factory_atlas_core::exporters::{export_balance_csv, export_graphviz_dot, export_summary_markdown};
+use factory_atlas_core::exporters::{
+    export_balance_csv, export_graphviz_dot, export_summary_markdown,
+};
 use factory_atlas_core::fixtures::build_benchmark_project;
 use factory_atlas_core::jar_importer::{JarImportOptions, import_mod_archive_reader};
 use factory_atlas_core::machine_speeds::compute_machine_throughput;
@@ -14,7 +16,9 @@ use factory_atlas_core::project_format::{
     create_empty_project, load_project_json_str, save_project_json_str,
 };
 use factory_atlas_core::solver::{IncrementalSolverCache, SolverCatalog, solve_factory_project};
-use factory_atlas_core::visual_matcher::{VisualMatchStatus, match_visual_resources, normalize_visual_query};
+use factory_atlas_core::visual_matcher::{
+    VisualMatchStatus, match_visual_resources, normalize_visual_query,
+};
 use factory_atlas_core::worker_pool::{BackgroundJob, BackgroundOutput, WorkerPool};
 use flate2::Compression;
 use flate2::write::GzEncoder;

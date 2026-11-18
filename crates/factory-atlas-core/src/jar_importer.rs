@@ -75,7 +75,9 @@ fn map_create_recipe_type_to_machine(raw_type: &str) -> (&'static str, Option<u3
         "minecraft:smelting" | "minecraft:blasting" | "minecraft:smoking" => {
             ("create:encased_fan", Some(150))
         }
-        "minecraft:crafting_shaped" | "minecraft:crafting_shapeless" => ("create:manual_craft", Some(20)),
+        "minecraft:crafting_shaped" | "minecraft:crafting_shapeless" => {
+            ("create:manual_craft", Some(20))
+        }
         _ => ("create:custom_machine", None),
     }
 }
@@ -325,7 +327,8 @@ pub fn import_mod_archive_reader<R: Read + Seek>(
                 namespaces.insert(ns.to_owned());
                 let sub = parts[1];
                 let tail = parts.get(2).copied().unwrap_or("");
-                let is_wanted_asset = (sub == "lang" && (tail == "en_us.json" || tail == "ru_ru.json"))
+                let is_wanted_asset = (sub == "lang"
+                    && (tail == "en_us.json" || tail == "ru_ru.json"))
                     || ((sub == "models" || sub == "blockstates") && tail.ends_with(".json"))
                     || (sub == "textures" && tail.ends_with(".png"));
 

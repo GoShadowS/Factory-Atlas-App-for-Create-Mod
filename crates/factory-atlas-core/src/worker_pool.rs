@@ -210,8 +210,13 @@ impl WorkerPool {
                                     let scanned = build_local_visual_index_from_dir(&dir);
                                     if !scanned.is_empty() {
                                         source_label = dir.display().to_string();
-                                        let mut by_id: std::collections::HashMap<String, VisualEntrySummary> =
-                                            entries.into_iter().map(|e| (e.id.clone(), e)).collect();
+                                        let mut by_id: std::collections::HashMap<
+                                            String,
+                                            VisualEntrySummary,
+                                        > = entries
+                                            .into_iter()
+                                            .map(|e| (e.id.clone(), e))
+                                            .collect();
                                         for e in scanned {
                                             by_id.insert(e.id.clone(), e);
                                         }

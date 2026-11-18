@@ -136,7 +136,11 @@ impl AssetSource for DirAssetSource {
     }
 }
 
-pub fn normalize_namespaced_ref(raw_ref: &str, kind: &str, default_ns: &str) -> Option<(String, String, String)> {
+pub fn normalize_namespaced_ref(
+    raw_ref: &str,
+    kind: &str,
+    default_ns: &str,
+) -> Option<(String, String, String)> {
     let trimmed = raw_ref.trim();
     if trimmed.is_empty() {
         return None;
@@ -688,7 +692,13 @@ pub fn build_local_visual_index_from_dir(root_dir: &Path) -> Vec<VisualEntrySumm
         let en_lang = load_lang_map(&ns_ent.path().join("lang/en_us.json"));
 
         let mut seen_ids: HashMap<String, VisualEntrySummary> = HashMap::new();
-        for kind_dir in ["models/item", "models/block", "blockstates", "textures/item", "textures/block"] {
+        for kind_dir in [
+            "models/item",
+            "models/block",
+            "blockstates",
+            "textures/item",
+            "textures/block",
+        ] {
             let dir_path = ns_ent.path().join(kind_dir);
             collect_files_recursive(&dir_path, &dir_path, &mut |rel_sub| {
                 let stem = rel_sub
