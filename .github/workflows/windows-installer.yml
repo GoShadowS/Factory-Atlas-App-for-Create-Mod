@@ -1,0 +1,92 @@
+name: Windows x64 Desktop Builds (Installer + Optional Portable ZIP)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows-x64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Install frontend dependencies
+        run: npm ci
+      - name: Verify TypeScript, unit tests, benchmark and frontend build
+        run: |
+          npm run check
+          npm test
+          npm run benchmark
+          npm run build
+      - name: Verify no copyrighted upstream textures tracked in git
+        shell: pwsh
+        run: |
+          $tracked = git ls-files | Where-Object { $_ -match '^(assets-local/|user-projects/)' }
+          if ($tracked) { throw "Forbidden local assets/projects tracked in git: $tracked" }
+
+      - name: Build Tauri Standard NSIS Installer (Windows x64, CurrentUser)
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: .
+          args: --target x86_64-pc-windows-msvc --bundles nsis
+
+      - name: Package Optional Portable ZIP (Windows x64 with isolated ./data directory)
+        shell: pwsh
+        run: |
+          $ver = (Get-Content package.json | ConvertFrom-Json).version
+          $relExe = "src-tauri/target/x86_64-pc-windows-msvc/release/factory-atlas.exe"
+          if (-not (Test-Path $relExe)) { throw "Compiled factory-atlas.exe not found at $relExe" }
+
+          $outDir = "dist-windows-artifacts"
+          $portRoot = "$outDir/Factory-Atlas-$ver-win64-portable"
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+          New-Item -ItemType Directory -Force -Path "$portRoot/data/projects" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$portRoot/data/assets-overrides" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$portRoot/assets-overrides" | Out-Null
+
+          Copy-Item $relExe "$portRoot/factory-atlas.exe"
+          Copy-Item "LICENSE" "$portRoot/LICENSE"
+          Copy-Item "THIRD_PARTY_NOTICES.md" "$portRoot/THIRD_PARTY_NOTICES.md"
+          if (Test-Path "assets-overrides/README.txt") {
+            Copy-Item "assets-overrides/README.txt" "$portRoot/assets-overrides/README.txt"
+          }
+          "portable-mode" | Out-File -Encoding ascii "$portRoot/portable.flag"
+          @"
+Factory Atlas $ver — Портативная версия (Windows x64)
+======================================================
+1. Распакуйте весь архив в любую удобную папку (например, D:\Apps\FactoryAtlas).
+2. Запустите factory-atlas.exe (установка и права администратора не требуются).
+3. Все проекты, автосохранение, кэш WebView2 и пользовательские PNG-текстуры
+   сохраняются строго рядом в подпапке .\data\ и не смешиваются с установленной версией.
+"@ | Out-File -Encoding utf8 "$portRoot/PORTABLE-README.txt"
+
+          $zipPath = "$outDir/Factory-Atlas-$ver-win64-portable.zip"
+          Compress-Archive -Path "$portRoot/*" -DestinationPath $zipPath -Force
+
+          $nsisDir = "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis"
+          $exe = Get-ChildItem -Path $nsisDir -Filter "*.exe" | Select-Object -First 1
+          if (-not $exe) { throw "NSIS installer .exe not found" }
+          Copy-Item $exe.FullName "$outDir/$($exe.Name)"
+
+          $sumLines = @()
+          foreach ($f in @("$outDir/$($exe.Name)", $zipPath)) {
+            $h = (Get-FileHash -Algorithm SHA256 -Path $f).Hash.ToLowerInvariant()
+            $sumLines += "$h  $(Split-Path -Leaf $f)"
+          }
+          $sumLines | Out-File -Encoding ascii "$outDir/SHA256SUMS.txt"
+          Get-Content "$outDir/SHA256SUMS.txt"
+
+      - name: Upload Installer + Portable ZIP + SHA-256 as workflow artifact (no auto-release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: factory-atlas-windows-x64-builds
+          path: |
+            dist-windows-artifacts/*.exe
+            dist-windows-artifacts/*.zip
+            dist-windows-artifacts/SHA256SUMS.txt
+          if-no-files-found: error

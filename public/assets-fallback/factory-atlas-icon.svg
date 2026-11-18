@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="12" y1="8" x2="116" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1E293B"/>
+      <stop offset="1" stop-color="#0F172A"/>
+    </linearGradient>
+    <linearGradient id="brass" x1="24" y1="24" x2="104" y2="104" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#F59E0B"/>
+      <stop offset="1" stop-color="#B45309"/>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="6" width="116" height="116" rx="24" fill="url(#bg)" stroke="#334155" stroke-width="4"/>
+  <!-- Blueprint grid -->
+  <path d="M26 42H102M26 64H102M26 86H102M42 26V102M64 26V102M86 26V102" stroke="#1E3A5F" stroke-width="1.5"/>
+  <!-- Outer compass ring -->
+  <circle cx="64" cy="64" r="36" stroke="url(#brass)" stroke-width="4" stroke-dasharray="10 6"/>
+  <!-- Schematic flow lines -->
+  <path d="M36 46L64 64L92 46M64 64V94" stroke="#38BDF8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Compass / Atlas star center -->
+  <polygon points="64,34 71,57 94,64 71,71 64,94 57,71 34,64 57,57" fill="url(#brass)" stroke="#FEF3C7" stroke-width="1.5" stroke-linejoin="round"/>
+  <circle cx="64" cy="64" r="7" fill="#0F172A" stroke="#FEF3C7" stroke-width="2"/>
+  <!-- Node endpoints -->
+  <circle cx="36" cy="46" r="5" fill="#38BDF8" stroke="#0F172A" stroke-width="2"/>
+  <circle cx="92" cy="46" r="5" fill="#38BDF8" stroke="#0F172A" stroke-width="2"/>
+  <circle cx="64" cy="94" r="5" fill="#34D399" stroke="#0F172A" stroke-width="2"/>
+</svg>
