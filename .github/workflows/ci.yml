@@ -1,0 +1,29 @@
+name: CI (Checks, Tests, Benchmark & Build)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run benchmark
+      - run: npm run build
+      - name: Verify no copyrighted upstream textures tracked in git
+        run: |
+          if git ls-files | grep -E '^(assets-local/|user-projects/)'; then
+            echo "ERROR: Local upstream textures or user projects must never be committed!"
+            exit 1
+          fi

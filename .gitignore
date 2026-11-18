@@ -1,0 +1,19 @@
+# Dependencies & build outputs
+node_modules/
+dist/
+out/
+coverage/
+.vite/
+*.tsbuildinfo
+
+# Local Tauri / Rust build artifacts
+src-tauri/target/
+
+# Local temporary upstream original textures (NOT for GitHub / public release!)
+assets-local/
+user-projects/
+
+# OS & editor files
+.DS_Store
+Thumbs.db
+*.log
