@@ -76,3 +76,19 @@ jobs:
             echo "ERROR: Local upstream textures or user projects must never be committed!"
             exit 1
           fi
+
+  native-app-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Build native Windows desktop executable
+        run: cargo build -p factory-atlas-app --release
+      - name: Upload native Windows desktop executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: factory-atlas-native-windows-x64
+          path: target/release/factory-atlas.exe
+          if-no-files-found: error
