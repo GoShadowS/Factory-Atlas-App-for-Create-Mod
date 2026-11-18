@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/factory-atlas-core",
+    "crates/factory-atlas-app",
 ]
 
 [workspace.package]

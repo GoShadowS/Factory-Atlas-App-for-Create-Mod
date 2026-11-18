@@ -1,0 +1,19 @@
+[package]
+name = "factory-atlas-app"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version = "1.95"
+description = "Native Rust desktop application for Factory Atlas"
+
+[[bin]]
+name = "factory-atlas"
+path = "src/main.rs"
+
+[dependencies]
+factory-atlas-core = { path = "../factory-atlas-core" }
+
+[target.'cfg(windows)'.dependencies]
+eframe = { version = "0.37.0", default-features = false, features = ["accesskit", "default_fonts", "glow"] }
+egui-winit = { version = "0.37.0", default-features = false, features = ["clipboard"] }
+rfd = { version = "0.17.2", default-features = false }
