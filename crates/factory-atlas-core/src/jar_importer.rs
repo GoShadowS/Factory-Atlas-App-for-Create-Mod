@@ -192,9 +192,11 @@ pub fn parse_mc_recipe_json(
                         if let Some(v) = key_map.get(&ch.to_string())
                             && let Some(ing) = parse_ingredient_val(v)
                         {
-                            let e = counts
-                                .entry(ing.resource_id)
-                                .or_insert((ing.kind, 0.0, ing.tag_name));
+                            let e = counts.entry(ing.resource_id).or_insert((
+                                ing.kind,
+                                0.0,
+                                ing.tag_name,
+                            ));
                             e.1 += ing.amount;
                         }
                     }
@@ -276,7 +278,10 @@ fn lookup_lang_name(id: &str, map: &HashMap<String, String>) -> Option<String> {
     let k1 = format!("item.{ns}.{}", rest.replace('/', "."));
     let k2 = format!("block.{ns}.{}", rest.replace('/', "."));
     let k3 = format!("fluid.{ns}.{}", rest.replace('/', "."));
-    map.get(&k1).or_else(|| map.get(&k2)).or_else(|| map.get(&k3)).cloned()
+    map.get(&k1)
+        .or_else(|| map.get(&k2))
+        .or_else(|| map.get(&k3))
+        .cloned()
 }
 
 pub fn import_mod_archive_reader<R: Read + Seek>(
@@ -408,7 +413,8 @@ pub fn import_mod_archive_reader<R: Read + Seek>(
             skipped_details.push(SkippedImportDetail {
                 path: path.clone(),
                 reason_code: "UNSUPPORTED_RECIPE".to_owned(),
-                message_ru: "Формат рецепта не распознан (например динамический или условие)".to_owned(),
+                message_ru: "Формат рецепта не распознан (например динамический или условие)"
+                    .to_owned(),
                 message_en: "Recipe format not recognized".to_owned(),
             });
         }

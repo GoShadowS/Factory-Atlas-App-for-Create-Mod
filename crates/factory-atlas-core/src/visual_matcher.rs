@@ -97,7 +97,8 @@ pub fn match_visual_resources(
             .any(|p| {
                 let lp = p.to_lowercase();
                 let np = lp.trim_end_matches(".json").trim_end_matches(".png");
-                clean_path.contains('/') && (np == clean_path || np.ends_with(&format!("/{clean_path}")))
+                clean_path.contains('/')
+                    && (np == clean_path || np.ends_with(&format!("/{clean_path}")))
             })
         })
         .cloned()

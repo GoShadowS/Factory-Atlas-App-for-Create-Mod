@@ -276,7 +276,8 @@ pub fn compute_machine_throughput(
             }
         }
         SpeedFormulaId::MechanicalMixer => {
-            let log_term = (512.0 / effective_rpm.max(1.0)).log2() * 15.0 * (base_dur / 100.0) + 1.0;
+            let log_term =
+                (512.0 / effective_rpm.max(1.0)).log2() * 15.0 * (base_dur / 100.0) + 1.0;
             let ticks = (40.0 + log_term.max(1.0)).ceil();
             MachineSpeedCalculation {
                 crafts_per_min: Some(TICKS_PER_MINUTE / ticks),
@@ -330,8 +331,9 @@ pub fn compute_machine_throughput(
                 ticks_per_craft: Some(ticks),
                 source: SpeedSource::ExactFormula,
                 stress_per_machine_su: Some(0.0),
-                explanation_ru: "Create 6.0.11: фиксированный цикл FILLING_TIME = 20 тиков (60 опер./мин)."
-                    .to_owned(),
+                explanation_ru:
+                    "Create 6.0.11: фиксированный цикл FILLING_TIME = 20 тиков (60 опер./мин)."
+                        .to_owned(),
                 explanation_en: "Create 6.0.11: fixed FILLING_TIME = 20 ticks (60 ops/min)."
                     .to_owned(),
             }

@@ -374,7 +374,9 @@ fn solve_component(
                     "Unit mismatch on edge \"{}\" -> \"{}\": cannot connect items/min and mB/min.",
                     from.title, to.title
                 ),
-                hint_ru: Some("Проверьте тип ресурса (предмет или жидкость) на обоих узлах.".to_owned()),
+                hint_ru: Some(
+                    "Проверьте тип ресурса (предмет или жидкость) на обоих узлах.".to_owned(),
+                ),
                 hint_en: Some("Verify item vs fluid unit on both ends.".to_owned()),
             });
             continue;
@@ -431,7 +433,9 @@ fn solve_component(
                 "Разорвите петлю обратной связи или отметьте один из возвратов как побочный выход."
                     .to_owned(),
             ),
-            hint_en: Some("Break the feedback loop to compute deterministic steady-state rates.".to_owned()),
+            hint_en: Some(
+                "Break the feedback loop to compute deterministic steady-state rates.".to_owned(),
+            ),
         });
     }
 

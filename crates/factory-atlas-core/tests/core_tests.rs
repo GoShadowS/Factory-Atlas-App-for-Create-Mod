@@ -30,7 +30,12 @@ use std::time::{Duration, Instant};
 use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
-fn make_visual_entry(id: &str, path_id: &str, name_en: &str, name_ru: Option<&str>) -> VisualEntrySummary {
+fn make_visual_entry(
+    id: &str,
+    path_id: &str,
+    name_en: &str,
+    name_ru: Option<&str>,
+) -> VisualEntrySummary {
     VisualEntrySummary {
         id: id.to_owned(),
         namespace: "create".to_owned(),
@@ -331,7 +336,8 @@ fn mc_model_resolves_parent_chains_blockstates_and_texture_cycles() {
     let src = MockAssets(files);
     let mut cache = BoundedModelCache::new(16);
 
-    let mut block_entry = make_visual_entry("create:brass_casing", "brass_casing", "Brass Casing", None);
+    let mut block_entry =
+        make_visual_entry("create:brass_casing", "brass_casing", "Brass Casing", None);
     block_entry.world_model_path = Some("create/models/block/brass_casing.json".into());
     block_entry.blockstate_path = Some("create/blockstates/brass_casing.json".into());
     block_entry.model_ref = Some("create:block/brass_casing".into());
@@ -346,7 +352,8 @@ fn mc_model_resolves_parent_chains_blockstates_and_texture_cycles() {
         Some("create/textures/block/brass_casing.png")
     );
 
-    let mut item_entry = make_visual_entry("create:brass_ingot", "brass_ingot", "Brass Ingot", None);
+    let mut item_entry =
+        make_visual_entry("create:brass_ingot", "brass_ingot", "Brass Ingot", None);
     item_entry.model_path = Some("create/models/item/brass_ingot.json".into());
     item_entry.texture_path = Some("create/textures/item/brass_ingot.png".into());
     item_entry.model_ref = Some("create:item/brass_ingot".into());

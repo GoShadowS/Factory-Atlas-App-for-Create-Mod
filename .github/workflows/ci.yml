@@ -45,7 +45,7 @@ jobs:
         shell: bash
         run: |
           if ! cargo fmt --all -- --check > "$RUNNER_TEMP/fmt.log" 2>&1; then
-            awk '/^Diff in /{cur=$0; next} /^[+-]/{print "::error::" cur " | " $0}' "$RUNNER_TEMP/fmt.log" | head -n 10
+            awk '/^Diff in /{sub(".*/crates/", "crates/", $0); cur=$0; seen=0; next} /^[+-]/{if(seen<2){print "::error::" cur " | " $0; seen++}}' "$RUNNER_TEMP/fmt.log" | head -n 10
             cat "$RUNNER_TEMP/fmt.log"
             exit 1
           fi
