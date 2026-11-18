@@ -1,4 +1,4 @@
-use crate::{add_node, add_resource, connect_source_to_target};
+use crate::app_logic::{add_node, add_resource, connect_source_to_target};
 use eframe::egui;
 use factory_atlas_core::model::FlowUnit;
 use factory_atlas_core::model::{FactoryNode, FactoryProject, NodeKind, ResourceKind};

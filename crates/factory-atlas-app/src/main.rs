@@ -1,3 +1,6 @@
+#[path = "lib.rs"]
+mod app_logic;
+
 #[cfg(windows)]
 mod windows_app;
 
