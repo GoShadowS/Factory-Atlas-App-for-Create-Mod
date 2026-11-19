@@ -858,7 +858,7 @@ impl FactoryAtlasApp {
                 let resources = self.project.custom_resources.clone();
                 let query = self.catalog_search.to_lowercase();
                 for resource in resources.iter().filter(|resource| {
-                    self.catalog_search.trim().is_empty()
+                    query.is_empty()
                         || resource.name_ru.to_lowercase().contains(&query)
                         || resource.name_en.to_lowercase().contains(&query)
                         || resource.id.to_lowercase().contains(&query)
