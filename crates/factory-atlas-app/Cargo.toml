@@ -17,3 +17,4 @@ factory-atlas-core = { path = "../factory-atlas-core" }
 eframe = { version = "0.37.0", default-features = false, features = ["accesskit", "default_fonts", "glow"] }
 egui-winit = { version = "0.37.0", default-features = false, features = ["clipboard"] }
 rfd = { version = "0.17.2", default-features = false }
+serde_json = "1.0"
