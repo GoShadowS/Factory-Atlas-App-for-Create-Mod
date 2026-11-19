@@ -71,7 +71,8 @@ struct FactoryAtlasApp {
     solver_pool: WorkerPool,
     solver_task_id: Option<u64>,
     solver_result: Option<SolverResult>,
-    last_solve_revision: String,
+    project_revision: u64,
+    last_solve_revision: u64,
     applied_theme: Option<ThemeMode>,
     resource_form: ResourceForm,
     node_form: NodeForm,
@@ -113,7 +114,8 @@ impl FactoryAtlasApp {
             solver_pool: WorkerPool::new(Some(2)),
             solver_task_id: None,
             solver_result: None,
-            last_solve_revision: String::new(),
+            project_revision: 1,
+            last_solve_revision: 0,
             applied_theme: None,
             resource_form: ResourceForm::default(),
             node_form: NodeForm::default(),
@@ -129,6 +131,12 @@ impl FactoryAtlasApp {
     fn set_status(&mut self, message: impl Into<String>, is_error: bool) {
         self.status = message.into();
         self.status_is_error = is_error;
+    }
+
+    fn mark_project_changed(&mut self) {
+        self.project_revision = self.project_revision.wrapping_add(1);
+        self.project.updated_at = now_iso_timestamp();
+        self.dirty = true;
     }
 
     fn save_current(&mut self) -> bool {
@@ -226,7 +234,7 @@ impl FactoryAtlasApp {
                 self.selected_target_id = None;
                 self.selected_node_id = None;
                 self.solver_result = None;
-                self.last_solve_revision.clear();
+                self.project_revision = self.project_revision.wrapping_add(1);
                 self.set_status("Создан пустой проект.", false);
             }
             PendingAction::OpenProject(path) => match load_project_file(&path) {
@@ -237,7 +245,8 @@ impl FactoryAtlasApp {
                     self.selected_source_id = None;
                     self.selected_target_id = None;
                     self.selected_node_id = None;
-                    self.last_solve_revision.clear();
+                    self.project_revision = self.project_revision.wrapping_add(1);
+                    self.solver_result = None;
                     self.record_recent_project(&path);
                     let message = if migration == Some(1) {
                         format!("Проект открыт и мигрирован с v1: {}", path.display())
@@ -262,7 +271,7 @@ impl FactoryAtlasApp {
             self.resource_form.kind,
         ) {
             Ok(()) => {
-                self.dirty = true;
+                self.mark_project_changed();
                 self.node_form.resource_id = Some(self.resource_form.id.trim().to_owned());
                 self.set_status("Ресурс добавлен в проект.", false);
                 self.resource_form = ResourceForm::default();
@@ -297,7 +306,7 @@ impl FactoryAtlasApp {
             rate,
         ) {
             Ok(_) => {
-                self.dirty = true;
+                self.mark_project_changed();
                 self.node_form.title.clear();
                 self.node_form.note.clear();
                 self.set_status("Узел добавлен в проект.", false);
@@ -316,7 +325,7 @@ impl FactoryAtlasApp {
         };
         match connect_source_to_target(&mut self.project, source, target) {
             Ok(()) => {
-                self.dirty = true;
+                self.mark_project_changed();
                 self.set_status("Связь добавлена.", false);
             }
             Err(error) => self.set_status(error, true),
@@ -351,26 +360,26 @@ impl FactoryAtlasApp {
         visuals.widgets.active.corner_radius = egui::CornerRadius::same(6);
         ctx.set_visuals(visuals);
 
-        let mut style = (*ctx.style()).clone();
-        style.spacing.item_spacing = egui::vec2(9.0, 8.0);
-        style.spacing.button_padding = egui::vec2(11.0, 7.0);
-        style.spacing.window_margin = egui::Margin::same(16);
-        style.visuals.override_text_color = Some(match self.settings.theme {
-            ThemeMode::Dark => egui::Color32::from_rgb(225, 231, 231),
-            ThemeMode::Light => egui::Color32::from_rgb(42, 50, 52),
+        ctx.global_style_mut(|style| {
+            style.spacing.item_spacing = egui::vec2(9.0, 8.0);
+            style.spacing.button_padding = egui::vec2(11.0, 7.0);
+            style.spacing.window_margin = egui::Margin::same(16);
+            style.visuals.override_text_color = Some(match self.settings.theme {
+                ThemeMode::Dark => egui::Color32::from_rgb(225, 231, 231),
+                ThemeMode::Light => egui::Color32::from_rgb(42, 50, 52),
+            });
         });
-        ctx.set_style(style);
         self.applied_theme = Some(self.settings.theme);
     }
 
     fn schedule_solver(&mut self) {
-        if self.last_solve_revision == self.project.updated_at {
+        if self.last_solve_revision == self.project_revision {
             return;
         }
         if let Some(task_id) = self.solver_task_id.take() {
             self.solver_pool.cancel_task(task_id);
         }
-        self.last_solve_revision = self.project.updated_at.clone();
+        self.last_solve_revision = self.project_revision;
         self.solver_result = None;
         self.solver_task_id = Some(self.solver_pool.submit(BackgroundJob::SolveProject {
             project: self.project.clone(),
@@ -639,7 +648,7 @@ impl FactoryAtlasApp {
         }
 
         if response.hovered() {
-            let scroll = ui.input(|input| input.raw_scroll_delta.y);
+            let scroll = ui.input(|input| input.smooth_scroll_delta.y);
             let ctrl = ui.input(|input| input.modifiers.ctrl);
             if ctrl && scroll != 0.0 {
                 self.canvas_zoom = (self.canvas_zoom * (1.0 + scroll * 0.001)).clamp(0.45, 2.4);
@@ -695,7 +704,7 @@ impl FactoryAtlasApp {
                 egui::Rect::from_min_size(position, egui::vec2(196.0, 88.0) * self.canvas_zoom);
             let response = ui.interact(
                 node_rect,
-                egui::Id::new(node.id.clone()),
+                egui::IdSalt::new(node.id.clone()),
                 egui::Sense::click_and_drag(),
             );
             let selected = self.selected_node_id.as_deref() == Some(node.id.as_str());
@@ -743,6 +752,7 @@ impl FactoryAtlasApp {
             );
             painter.text(
                 text_pos + egui::vec2(0.0, 23.0 * self.canvas_zoom),
+                egui::Align2::LEFT_TOP,
                 &node.title,
                 egui::FontId::proportional((15.0 * self.canvas_zoom).clamp(12.0, 17.0)),
                 egui::Color32::from_rgb(236, 239, 237),
@@ -768,14 +778,14 @@ impl FactoryAtlasApp {
                 .unwrap_or_else(|| "Узел производственной цепочки".to_owned());
             painter.text(
                 text_pos + egui::vec2(0.0, 48.0 * self.canvas_zoom),
+                egui::Align2::LEFT_TOP,
                 detail,
                 egui::FontId::proportional((11.0 * self.canvas_zoom).clamp(9.0, 12.0)),
                 muted(),
             );
         }
         if moved {
-            self.project.updated_at = now_iso_timestamp();
-            self.dirty = true;
+            self.mark_project_changed();
         }
 
         if self.project.nodes.is_empty() {
@@ -855,7 +865,7 @@ impl FactoryAtlasApp {
             return;
         };
         let mut changed = false;
-        let mut remove_node = false;
+        let remove_node;
         {
             let node = &mut self.project.nodes[index];
             ui.label(
@@ -922,8 +932,7 @@ impl FactoryAtlasApp {
                 .clicked();
         }
         if changed {
-            self.project.updated_at = now_iso_timestamp();
-            self.dirty = true;
+            self.mark_project_changed();
         }
         if remove_node {
             self.project.nodes.remove(index);
@@ -931,8 +940,7 @@ impl FactoryAtlasApp {
                 .edges
                 .retain(|edge| edge.from_node_id != id && edge.to_node_id != id);
             self.selected_node_id = None;
-            self.project.updated_at = now_iso_timestamp();
-            self.dirty = true;
+            self.mark_project_changed();
         }
     }
 
@@ -1015,29 +1023,33 @@ impl FactoryAtlasApp {
         if !self.show_node_dialog {
             return;
         }
+        let mut open = self.show_node_dialog;
         egui::Window::new("Добавить узел")
             .collapsible(false)
             .resizable(false)
             .default_width(430.0)
-            .open(&mut self.show_node_dialog)
+            .open(&mut open)
             .show(ctx, |ui| {
                 self.draw_node_editor(ui);
             });
+        self.show_node_dialog = open;
     }
 
     fn draw_link_dialog(&mut self, ctx: &egui::Context) {
         if !self.show_link_dialog {
             return;
         }
+        let mut open = self.show_link_dialog;
         egui::Window::new("Соединить узлы")
             .collapsible(false)
             .resizable(false)
             .default_width(390.0)
-            .open(&mut self.show_link_dialog)
+            .open(&mut open)
             .show(ctx, |ui| {
                 ui.label("Создайте связь между источником и целью с одинаковым ресурсом.");
                 self.draw_edge_editor(ui);
             });
+        self.show_link_dialog = open;
     }
 
     fn draw_toolbar(&mut self, ui: &mut egui::Ui) {
@@ -1066,8 +1078,7 @@ impl FactoryAtlasApp {
                 )
                 .changed()
             {
-                self.project.updated_at = now_iso_timestamp();
-                self.dirty = true;
+                self.mark_project_changed();
             }
             if ui.button("Новый").clicked() {
                 self.request_action(PendingAction::NewProject);
@@ -1223,7 +1234,13 @@ impl FactoryAtlasApp {
             ui.label("Пока нет узлов. Новый проект остаётся пустым, пока вы сами их не добавите.");
         }
         for node in &self.project.nodes {
-            draw_node_row(ui, node, &self.project);
+            ui.horizontal(|ui| {
+                ui.colored_label(
+                    node_accent(node.kind, node.resource_kind),
+                    node_kind_icon(node.kind),
+                );
+                ui.label(&node.title);
+            });
         }
     }
 
@@ -1363,11 +1380,11 @@ impl eframe::App for FactoryAtlasApp {
         self.poll_solver();
         self.schedule_solver();
 
-        egui::TopBottomPanel::top("factory-atlas-toolbar")
-            .exact_height(55.0)
+        egui::Panel::top("factory-atlas-toolbar")
+            .exact_size(55.0)
             .show_inside(ui, |ui| self.draw_toolbar(ui));
-        egui::TopBottomPanel::bottom("factory-atlas-status")
-            .exact_height(28.0)
+        egui::Panel::bottom("factory-atlas-status")
+            .exact_size(28.0)
             .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.colored_label(
@@ -1389,35 +1406,32 @@ impl eframe::App for FactoryAtlasApp {
                 });
             });
         if self.active_view == MainView::Workspace {
-            egui::TopBottomPanel::bottom("factory-atlas-analysis")
+            egui::Panel::bottom("factory-atlas-analysis")
                 .resizable(true)
-                .default_height(132.0)
-                .min_height(88.0)
-                .max_height(260.0)
+                .default_size(132.0)
+                .size_range(88.0..=260.0)
                 .show_inside(ui, |ui| self.draw_analysis(ui));
         }
-        egui::SidePanel::left("factory-atlas-navigation")
-            .exact_width(166.0)
+        egui::Panel::left("factory-atlas-navigation")
+            .exact_size(166.0)
             .show_inside(ui, |ui| {
                 ui.add_space(7.0);
                 self.draw_navigation(ui);
             });
         if self.active_view == MainView::Workspace {
-            egui::SidePanel::left("factory-atlas-catalog")
+            egui::Panel::left("factory-atlas-catalog")
                 .resizable(true)
-                .default_width(238.0)
-                .min_width(185.0)
-                .max_width(370.0)
+                .default_size(238.0)
+                .size_range(185.0..=370.0)
                 .show_inside(ui, |ui| self.draw_catalog(ui));
-            egui::SidePanel::right("factory-atlas-inspector")
+            egui::Panel::right("factory-atlas-inspector")
                 .resizable(true)
-                .default_width(270.0)
-                .min_width(215.0)
-                .max_width(390.0)
+                .default_size(270.0)
+                .size_range(215.0..=390.0)
                 .show_inside(ui, |ui| self.draw_inspector(ui));
-            egui::CentralPanel::default().show_inside(ui, |ui| self.draw_canvas(ui));
+            egui::CentralPanel::default().show(ui, |ui| self.draw_canvas(ui));
         } else {
-            egui::CentralPanel::default().show_inside(ui, |ui| {
+            egui::CentralPanel::default().show(ui, |ui| {
                 ui.heading("Каталог ресурсов");
                 ui.label(egui::RichText::new("Создавайте собственные предметы и жидкости. Они принадлежат только этому проекту.").color(muted()));
                 ui.separator();
@@ -1553,7 +1567,7 @@ pub fn run() -> eframe::Result {
         "Factory Atlas",
         native_options,
         Box::new(|creation_context| {
-            let mut app = FactoryAtlasApp::new();
+            let app = FactoryAtlasApp::new();
             let ctx = creation_context.egui_ctx.clone();
             app.solver_pool
                 .set_wakeup(Arc::new(move || ctx.request_repaint()));
