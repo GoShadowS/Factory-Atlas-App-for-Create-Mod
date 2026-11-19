@@ -711,12 +711,9 @@ impl FactoryAtlasApp {
             if response.clicked() {
                 self.selected_node_id = Some(node.id.clone());
             }
-            if response.dragged() {
-                let delta = response.drag_delta() / self.canvas_zoom;
-                self.project.nodes[index].x += f64::from(delta.x);
-                self.project.nodes[index].y += f64::from(delta.y);
-                moved = true;
-            }
+            let drag_delta = response
+                .dragged()
+                .then(|| response.drag_delta() / self.canvas_zoom);
             let accent = node_accent(node.kind, node.resource_kind);
             let fill = if selected {
                 egui::Color32::from_rgb(41, 47, 47)
@@ -783,6 +780,12 @@ impl FactoryAtlasApp {
                 egui::FontId::proportional((11.0 * self.canvas_zoom).clamp(9.0, 12.0)),
                 muted(),
             );
+            if let Some(delta) = drag_delta {
+                let dragged_node = &mut self.project.nodes[index];
+                dragged_node.x += f64::from(delta.x);
+                dragged_node.y += f64::from(delta.y);
+                moved = true;
+            }
         }
         if moved {
             self.mark_project_changed();
