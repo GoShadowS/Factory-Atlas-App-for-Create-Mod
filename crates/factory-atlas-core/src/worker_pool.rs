@@ -1,6 +1,6 @@
 use crate::jar_importer::{JarImportOptions, import_mod_archive_file};
 use crate::mc_model::{
-    AssetSource, DirAssetSource, ResolvedMcAsset, build_local_visual_index_from_dir,
+    AssetSource, DirAssetSource, ResolvedMcAsset, build_local_visual_index_from_dir_with_progress,
     load_visual_index_file, resolve_visual_entry_asset,
 };
 use crate::model::{
@@ -30,6 +30,9 @@ pub enum BackgroundJob {
     ResolveMcAsset {
         entry: VisualEntrySummary,
         asset_roots: Vec<PathBuf>,
+    },
+    LoadTexturePreview {
+        path: PathBuf,
     },
     ParseNbtFile {
         path: PathBuf,
@@ -61,6 +64,13 @@ pub enum BackgroundOutput {
         task_id: u64,
         entry_id: String,
         asset: Box<ResolvedMcAsset>,
+    },
+    TexturePreviewReady {
+        task_id: u64,
+        path: PathBuf,
+        width: usize,
+        height: usize,
+        rgba: Vec<u8>,
     },
     NbtParsed {
         task_id: u64,
@@ -210,7 +220,19 @@ impl WorkerPool {
                                     if task.cancel.load(Ordering::Relaxed) {
                                         break;
                                     }
-                                    let scanned = build_local_visual_index_from_dir(&dir);
+                                    let tid = task.task_id;
+                                    let scanned = build_local_visual_index_from_dir_with_progress(
+                                        &dir,
+                                        &task.cancel,
+                                        |done| {
+                                            emit(BackgroundOutput::Progress {
+                                                task_id: tid,
+                                                done,
+                                                total: 0,
+                                                message: format!("Индексировано файлов: {done}"),
+                                            });
+                                        },
+                                    );
                                     if !scanned.is_empty() {
                                         source_label = dir.display().to_string();
                                         let mut by_id: std::collections::HashMap<
@@ -249,6 +271,53 @@ impl WorkerPool {
                                         entry_id: entry.id,
                                         asset: Box::new(asset),
                                     });
+                                }
+                            }
+                            BackgroundJob::LoadTexturePreview { path } => {
+                                let decoded = (|| {
+                                    let metadata = fs::metadata(&path).ok()?;
+                                    if metadata.len() > 16 * 1024 * 1024 {
+                                        return None;
+                                    }
+                                    let bytes = fs::read(&path).ok()?;
+                                    let image = image::load_from_memory_with_format(
+                                        &bytes,
+                                        image::ImageFormat::Png,
+                                    )
+                                    .ok()?;
+                                    if image.width() > 8192
+                                        || image.height() > 8192
+                                        || u64::from(image.width()) * u64::from(image.height())
+                                            > 16_777_216
+                                    {
+                                        return None;
+                                    }
+                                    let preview = image.thumbnail(512, 512).to_rgba8();
+                                    Some((
+                                        preview.width() as usize,
+                                        preview.height() as usize,
+                                        preview.into_raw(),
+                                    ))
+                                })();
+                                if !task.cancel.load(Ordering::Relaxed) {
+                                    match decoded {
+                                        Some((width, height, rgba)) => {
+                                            emit(BackgroundOutput::TexturePreviewReady {
+                                                task_id: task.task_id,
+                                                path,
+                                                width,
+                                                height,
+                                                rgba,
+                                            });
+                                        }
+                                        None => emit(BackgroundOutput::Failed {
+                                            task_id: task.task_id,
+                                            error: format!(
+                                                "Не удалось открыть PNG для предпросмотра: {}",
+                                                path.display()
+                                            ),
+                                        }),
+                                    }
                                 }
                             }
                             BackgroundJob::ParseNbtFile { path } => match fs::read(&path) {

@@ -946,6 +946,7 @@ dependencies = [
  "egui-winit",
  "factory-atlas-core",
  "rfd",
+ "serde_json",
 ]
 
 [[package]]
@@ -954,6 +955,7 @@ version = "0.2.0"
 dependencies = [
  "directories",
  "flate2",
+ "image",
  "serde",
  "serde_json",
  "zip",

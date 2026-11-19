@@ -1,14 +1,15 @@
 use crate::app_logic::{add_node, add_resource, connect_source_to_target};
 use eframe::egui;
 use factory_atlas_core::model::{
-    AppSettings, FactoryNode, FactoryProject, FlowUnit, NodeKind, ResourceKind, SolverResult,
-    ThemeMode, WarningSeverity,
+    AppSettings, FactoryNode, FactoryProject, FlowUnit, MatchReason, ModelSupportStatus, NodeKind,
+    ResourceKind, ResourceVisualAssignment, SolverResult, ThemeMode, VisualEntrySummary,
+    WarningSeverity,
 };
 use factory_atlas_core::project_format::{create_empty_project, now_iso_timestamp};
 use factory_atlas_core::storage::{AppPaths, load_project_file, save_project_file};
 use factory_atlas_core::worker_pool::{BackgroundJob, BackgroundOutput, WorkerPool};
 use rfd::FileDialog;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -82,12 +83,24 @@ struct FactoryAtlasApp {
     show_close_prompt: bool,
     status: String,
     status_is_error: bool,
+    visual_entries: Vec<VisualEntrySummary>,
+    visual_scan_task_id: Option<u64>,
+    visual_search: String,
+    selected_visual_id: Option<String>,
+    selected_visual_resource_id: Option<String>,
+    visual_roots: Vec<PathBuf>,
+    visual_scan_root: Option<PathBuf>,
+    texture_cache: HashMap<PathBuf, egui::TextureHandle>,
+    texture_cache_order: VecDeque<PathBuf>,
+    texture_preview_task_id: Option<u64>,
+    texture_preview_path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum MainView {
     Workspace,
     Resources,
+    Assets,
 }
 
 impl FactoryAtlasApp {
@@ -98,7 +111,8 @@ impl FactoryAtlasApp {
             .ensure_dirs()
             .err()
             .unwrap_or_else(|| "Новый пустой проект. Создайте свои ресурсы и узлы.".to_owned());
-        Self {
+        let configured_assets = settings.local_assets_dir.clone().map(PathBuf::from);
+        let mut app = Self {
             paths,
             settings,
             project: create_empty_project("Новый проект"),
@@ -125,7 +139,22 @@ impl FactoryAtlasApp {
             show_close_prompt: false,
             status_is_error: false,
             status,
+            visual_entries: Vec::new(),
+            visual_scan_task_id: None,
+            visual_search: String::new(),
+            selected_visual_id: None,
+            selected_visual_resource_id: None,
+            visual_roots: Vec::new(),
+            visual_scan_root: None,
+            texture_cache: HashMap::new(),
+            texture_cache_order: VecDeque::new(),
+            texture_preview_task_id: None,
+            texture_preview_path: None,
+        };
+        if let Some(root) = configured_assets.filter(|path| path.is_dir()) {
+            app.begin_visual_scan(root);
         }
+        app
     }
 
     fn set_status(&mut self, message: impl Into<String>, is_error: bool) {
@@ -386,9 +415,69 @@ impl FactoryAtlasApp {
         }));
     }
 
-    fn poll_solver(&mut self) {
+    fn poll_solver(&mut self, ctx: &egui::Context) {
         for output in self.solver_pool.poll_outputs() {
             match output {
+                BackgroundOutput::VisualIndexReady {
+                    task_id,
+                    entries,
+                    source_label,
+                } if self.visual_scan_task_id == Some(task_id) => {
+                    let cache = self.paths.assets_local_dir.join("visual-index.json");
+                    if let Ok(serialized) = serde_json::to_vec(&entries) {
+                        let _ = std::fs::write(cache, serialized);
+                    }
+                    if let Some(root) = &self.visual_scan_root {
+                        let marker = self.paths.assets_local_dir.join("visual-index-root.txt");
+                        let _ = std::fs::write(marker, root.to_string_lossy().as_bytes());
+                    }
+                    self.visual_scan_root = None;
+                    self.visual_entries = entries;
+                    self.visual_scan_task_id = None;
+                    self.set_status(
+                        format!(
+                            "Индекс готов: {} записей · {}",
+                            self.visual_entries.len(),
+                            source_label
+                        ),
+                        false,
+                    );
+                }
+                BackgroundOutput::Progress {
+                    task_id, message, ..
+                } if self.visual_scan_task_id == Some(task_id) => {
+                    self.set_status(message, false);
+                }
+                BackgroundOutput::TexturePreviewReady {
+                    task_id,
+                    path,
+                    width,
+                    height,
+                    rgba,
+                } if self.texture_preview_task_id == Some(task_id) => {
+                    let image = egui::ColorImage::from_rgba_unmultiplied([width, height], &rgba);
+                    let texture = ctx.load_texture(
+                        path.to_string_lossy(),
+                        image,
+                        egui::TextureOptions::NEAREST,
+                    );
+                    if self.texture_cache.len() >= 4
+                        && let Some(oldest) = self.texture_cache_order.pop_front()
+                    {
+                        self.texture_cache.remove(&oldest);
+                    }
+                    self.texture_cache_order.push_back(path.clone());
+                    self.texture_cache.insert(path, texture);
+                    self.texture_preview_task_id = None;
+                    self.texture_preview_path = None;
+                }
+                BackgroundOutput::Failed { task_id, error }
+                    if self.texture_preview_task_id == Some(task_id) =>
+                {
+                    self.set_status(error, true);
+                    self.texture_preview_task_id = None;
+                    self.texture_preview_path = None;
+                }
                 BackgroundOutput::Solved { task_id, result }
                     if self.solver_task_id == Some(task_id) =>
                 {
@@ -404,6 +493,126 @@ impl FactoryAtlasApp {
                 _ => {}
             }
         }
+    }
+
+    fn begin_visual_scan(&mut self, selected: PathBuf) {
+        let assets_root = if selected.join("assets").is_dir() {
+            selected.join("assets")
+        } else {
+            selected
+        };
+        if let Some(old_task) = self.visual_scan_task_id.take() {
+            self.solver_pool.cancel_task(old_task);
+        }
+        let cache_root = self.paths.assets_local_dir.join("visual-index-root.txt");
+        let cache_path = self.paths.assets_local_dir.join("visual-index.json");
+        let cached_for_root = std::fs::read_to_string(&cache_root)
+            .ok()
+            .is_some_and(|saved| saved.trim() == assets_root.to_string_lossy().into_owned());
+        let index_json_path = cached_for_root.then_some(cache_path);
+        let _ = std::fs::create_dir_all(&self.paths.assets_local_dir);
+        self.settings.local_assets_dir = Some(assets_root.to_string_lossy().into_owned());
+        if let Err(error) = self.paths.save_settings(&self.settings) {
+            self.set_status(
+                format!("Не удалось сохранить путь к библиотеке: {error}"),
+                true,
+            );
+        }
+        self.visual_roots = vec![assets_root.clone()];
+        self.visual_scan_root = Some(assets_root.clone());
+        self.visual_entries.clear();
+        self.selected_visual_id = None;
+        if let Some(task_id) = self.texture_preview_task_id.take() {
+            self.solver_pool.cancel_task(task_id);
+        }
+        self.texture_preview_path = None;
+        self.texture_cache.clear();
+        self.texture_cache_order.clear();
+        self.visual_scan_task_id = Some(self.solver_pool.submit(BackgroundJob::LoadVisualIndex {
+            index_json_path,
+            scan_dirs: vec![assets_root.clone()],
+        }));
+        self.set_status(
+            format!("Индексация ассетов в фоне: {}", assets_root.display()),
+            false,
+        );
+    }
+
+    fn texture_file_for(&self, entry: &VisualEntrySummary) -> Option<PathBuf> {
+        let relative = entry.texture_path.as_deref()?;
+        self.visual_roots
+            .iter()
+            .map(|root| root.join(relative))
+            .find(|path| path.is_file())
+    }
+
+    fn load_texture(&mut self, path: &Path) -> Option<egui::TextureHandle> {
+        if let Some(texture) = self.texture_cache.get(path) {
+            return Some(texture.clone());
+        }
+        if self.texture_preview_path.as_deref() != Some(path) {
+            if let Some(task_id) = self.texture_preview_task_id.take() {
+                self.solver_pool.cancel_task(task_id);
+            }
+            let path = path.to_path_buf();
+            self.texture_preview_task_id = Some(
+                self.solver_pool
+                    .submit(BackgroundJob::LoadTexturePreview { path: path.clone() }),
+            );
+            self.texture_preview_path = Some(path);
+        }
+        None
+    }
+
+    fn assign_selected_visual(&mut self) {
+        let (Some(asset_id), Some(resource_id)) = (
+            self.selected_visual_id.clone(),
+            self.selected_visual_resource_id.clone(),
+        ) else {
+            return;
+        };
+        let Some(entry) = self
+            .visual_entries
+            .iter()
+            .find(|entry| entry.id == asset_id)
+            .cloned()
+        else {
+            return;
+        };
+        let Some(path) = self.texture_file_for(&entry) else {
+            self.set_status("У этой записи нет доступной 2D-текстуры.", true);
+            return;
+        };
+        let Some(resource) = self
+            .project
+            .custom_resources
+            .iter_mut()
+            .find(|resource| resource.id == resource_id)
+        else {
+            self.set_status("Сначала создайте ресурс и выберите его.", true);
+            return;
+        };
+        resource.visual = Some(ResourceVisualAssignment {
+            visual_id: Some(entry.id.clone()),
+            model_ref: entry.model_ref.clone(),
+            model_path: entry.model_path.clone(),
+            texture_path: entry.texture_path.clone(),
+            model_support: if entry.has_model_3d {
+                entry.model_support
+            } else {
+                ModelSupportStatus::None
+            },
+            custom_texture_override_path: Some(path.to_string_lossy().into_owned()),
+            custom_texture_override_data_url: None,
+            custom_model_json: None,
+            disabled: false,
+            match_reason: Some(MatchReason::Manual),
+        });
+        self.mark_project_changed();
+        self.set_status(
+            format!("Текстура вручную привязана к {resource_id}."),
+            false,
+        );
     }
 
     fn record_recent_project(&mut self, path: &Path) {
@@ -441,6 +650,7 @@ impl FactoryAtlasApp {
         for (view, icon, label) in [
             (MainView::Workspace, "▦", "Граф"),
             (MainView::Resources, "◆", "Ресурсы"),
+            (MainView::Assets, "▧", "Ассеты"),
         ] {
             let selected = self.active_view == view;
             let text = egui::RichText::new(format!("{icon}   {label}"))
@@ -476,6 +686,150 @@ impl FactoryAtlasApp {
         ui.small("Данные добавляются вручную.");
     }
 
+    fn draw_visual_library(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.heading("Библиотека визуальных ассетов");
+                ui.label(
+                    egui::RichText::new(
+                        "Локальные оригиналы · поиск и привязка выполняются вручную",
+                    )
+                    .color(muted()),
+                );
+            });
+            if ui.button("Выбрать папку…").clicked()
+                && let Some(path) = FileDialog::new()
+                    .set_title("Папка texture pack или assets")
+                    .pick_folder()
+            {
+                self.begin_visual_scan(path);
+            }
+        });
+        ui.add_space(6.0);
+        if let Some(root) = self.visual_roots.first() {
+            ui.small(format!("Источник: {}", root.display()));
+        } else {
+            ui.label("Выберите папку texture pack или папку assets. Она сохранится в настройках приложения.");
+        }
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut self.visual_search)
+                    .hint_text("Поиск по ID и имени ассета")
+                    .desired_width(320.0),
+            );
+            if self.visual_scan_task_id.is_some() {
+                ui.spinner();
+                ui.label("Индексация в фоне…");
+                if ui.small_button("Отменить").clicked()
+                    && let Some(task_id) = self.visual_scan_task_id.take()
+                {
+                    self.solver_pool.cancel_task(task_id);
+                    self.visual_scan_root = None;
+                    self.set_status("Индексация отменена.", false);
+                }
+            } else {
+                ui.label(format!(
+                    "{} совпадений в индексе",
+                    self.visual_entries.len()
+                ));
+            }
+        });
+        ui.separator();
+        ui.horizontal(|ui| {
+            ui.label("Привязать к существующему ресурсу:");
+            let selected = self
+                .selected_visual_resource_id
+                .as_deref()
+                .and_then(|id| self.project.custom_resources.iter().find(|r| r.id == id))
+                .map(|r| format!("{} · {}", r.name_ru, r.id))
+                .unwrap_or_else(|| "Выберите ресурс".to_owned());
+            egui::ComboBox::from_id_salt("visual-resource-target")
+                .selected_text(selected)
+                .show_ui(ui, |ui| {
+                    for resource in &self.project.custom_resources {
+                        ui.selectable_value(
+                            &mut self.selected_visual_resource_id,
+                            Some(resource.id.clone()),
+                            format!("{} · {}", resource.name_ru, resource.id),
+                        );
+                    }
+                });
+            let can_assign =
+                self.selected_visual_id.is_some()
+                    && self.selected_visual_resource_id.is_some()
+                    && self.project.custom_resources.iter().any(|r| {
+                        Some(r.id.as_str()) == self.selected_visual_resource_id.as_deref()
+                    });
+            if ui
+                .add_enabled(
+                    can_assign,
+                    egui::Button::new("Привязать выбранную текстуру"),
+                )
+                .clicked()
+            {
+                self.assign_selected_visual();
+            }
+        });
+        ui.separator();
+        ui.columns(2, |columns| {
+            egui::ScrollArea::vertical().id_salt("visual-library-list").show(&mut columns[0], |ui| {
+                let query = self.visual_search.trim().to_lowercase();
+                let visible: Vec<_> = self.visual_entries.iter().filter(|entry| {
+                    query.is_empty()
+                        || entry.id.to_lowercase().contains(&query)
+                        || entry.name_en.to_lowercase().contains(&query)
+                        || entry.name_ru.as_deref().is_some_and(|name| name.to_lowercase().contains(&query))
+                }).cloned().take(300).collect();
+                for entry in visible {
+                    let selected = self.selected_visual_id.as_deref() == Some(entry.id.as_str());
+                    let label = format!("{}  {}", if entry.has_texture_2d { "▧" } else { "◇" }, entry.name_ru.as_deref().unwrap_or(&entry.name_en));
+                    if ui.add_sized([ui.available_width(), 36.0], egui::Button::new(label).selected(selected)).clicked() {
+                        self.selected_visual_id = Some(entry.id.clone());
+                    }
+                    ui.small(format!("{} · {}", entry.id, if entry.has_texture_2d { "2D-текстура" } else if entry.has_model_3d { "модель 3D · текстура не найдена" } else { "геометрия/текстура не найдена" }));
+                }
+                if self.visual_entries.len() > 300 {
+                    ui.small("Показаны первые 300 записей; уточните запрос для фильтрации.");
+                }
+                if self.visual_entries.is_empty() && self.visual_scan_task_id.is_none() {
+                    ui.label("В выбранной папке индексируемых моделей и текстур не найдено.");
+                }
+            });
+            egui::ScrollArea::vertical().show(&mut columns[1], |ui| {
+                let chosen = self.selected_visual_id.as_deref()
+                    .and_then(|id| self.visual_entries.iter().find(|entry| entry.id == id)).cloned();
+                if let Some(entry) = chosen {
+                    ui.heading(entry.name_ru.as_deref().unwrap_or(&entry.name_en));
+                    ui.label(&entry.id);
+                    ui.label(if entry.has_texture_2d { "2D-текстура PNG" } else { "Текстура отсутствует" });
+                    ui.label(if entry.has_model_3d { "В индексе есть JSON-геометрия 3D; отдельный 3D-просмотрщик в этом этапе не реализован." } else { "3D-геометрия не подтверждена; PNG не представляется моделью." });
+                    ui.small(format!("Источник: {} · {} · commit {}", entry.source_repo, entry.source_branch, entry.source_commit));
+                    ui.small(format!("Лицензия: {}", entry.license));
+                    if let Some(relative) = &entry.texture_path { ui.small(format!("Путь: {relative}")); }
+                    if let Some(path) = self.texture_file_for(&entry) {
+                        if let Some(texture) = self.load_texture(&path) {
+                            let available = ui.available_size();
+                            let size = texture.size_vec2();
+                            let scale = (available.x.min(360.0) / size.x)
+                                .min(available.y.min(360.0) / size.y)
+                                .min(1.0);
+                            ui.image((texture.id(), size * scale));
+                        } else if self.texture_preview_path.as_deref() == Some(path.as_path()) {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.label("Декодирование текстуры в фоне…");
+                            });
+                        } else {
+                            ui.colored_label(error_color(), "PNG недоступен или превышает лимиты предпросмотра.");
+                        }
+                    }
+                } else {
+                    ui.label("Выберите запись для просмотра оригинальной текстуры и сведений об источнике.");
+                }
+            });
+        });
+    }
+
     fn draw_catalog(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.heading("Каталог");
@@ -501,30 +855,41 @@ impl FactoryAtlasApp {
                 if self.project.custom_resources.is_empty() {
                     ui.label(egui::RichText::new("Здесь появятся ресурсы проекта.").color(muted()));
                 }
-                for resource in self.project.custom_resources.iter().filter(|resource| {
+                let resources = self.project.custom_resources.clone();
+                let query = self.catalog_search.to_lowercase();
+                for resource in resources.iter().filter(|resource| {
                     self.catalog_search.trim().is_empty()
-                        || resource
-                            .name_ru
-                            .to_lowercase()
-                            .contains(&self.catalog_search.to_lowercase())
-                        || resource
-                            .name_en
-                            .to_lowercase()
-                            .contains(&self.catalog_search.to_lowercase())
-                        || resource
-                            .id
-                            .to_lowercase()
-                            .contains(&self.catalog_search.to_lowercase())
+                        || resource.name_ru.to_lowercase().contains(&query)
+                        || resource.name_en.to_lowercase().contains(&query)
+                        || resource.id.to_lowercase().contains(&query)
                 }) {
                     let (color, symbol) = match resource.kind {
                         ResourceKind::Item => (item_color(), "◆"),
                         ResourceKind::Fluid => (fluid_color(), "◉"),
                     };
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new(symbol).color(color).strong());
+                        let preview = resource
+                            .visual
+                            .as_ref()
+                            .and_then(|visual| visual.custom_texture_override_path.as_deref())
+                            .map(PathBuf::from);
+                        if let Some(path) = preview {
+                            if let Some(texture) = self.load_texture(&path) {
+                                ui.image((texture.id(), egui::vec2(28.0, 28.0)));
+                            } else {
+                                ui.label(egui::RichText::new(symbol).color(color).strong());
+                            }
+                        } else {
+                            ui.label(egui::RichText::new(symbol).color(color).strong());
+                        }
                         ui.vertical(|ui| {
                             ui.label(egui::RichText::new(&resource.name_ru).strong());
                             ui.small(egui::RichText::new(&resource.id).color(muted()));
+                            if resource.visual.is_some() {
+                                ui.small(
+                                    egui::RichText::new("Визуал привязан вручную").color(copper()),
+                                );
+                            }
                         });
                     });
                 }
@@ -1155,9 +1520,22 @@ impl FactoryAtlasApp {
             "В проекте: {}",
             self.project.custom_resources.len()
         ));
-        for resource in &self.project.custom_resources {
+        for resource in self.project.custom_resources.clone() {
             ui.horizontal(|ui| {
-                ui.label(resource_kind_icon(resource.kind));
+                let preview = resource
+                    .visual
+                    .as_ref()
+                    .and_then(|visual| visual.custom_texture_override_path.as_deref())
+                    .map(PathBuf::from);
+                if let Some(path) = preview {
+                    if let Some(texture) = self.load_texture(&path) {
+                        ui.image((texture.id(), egui::vec2(36.0, 36.0)));
+                    } else {
+                        ui.label(resource_kind_icon(resource.kind));
+                    }
+                } else {
+                    ui.label(resource_kind_icon(resource.kind));
+                }
                 ui.vertical(|ui| {
                     ui.label(&resource.name_ru);
                     ui.small(format!(
@@ -1165,6 +1543,9 @@ impl FactoryAtlasApp {
                         resource.id,
                         resource_kind_name(resource.kind)
                     ));
+                    if resource.visual.is_some() {
+                        ui.small("Оригинальная текстура подключена вручную");
+                    }
                 });
             });
             ui.add_space(3.0);
@@ -1381,7 +1762,7 @@ impl eframe::App for FactoryAtlasApp {
         if self.applied_theme != Some(self.settings.theme) {
             self.apply_theme(&ctx);
         }
-        self.poll_solver();
+        self.poll_solver(&ctx);
         self.schedule_solver();
 
         egui::Panel::top("factory-atlas-toolbar")
@@ -1434,13 +1815,15 @@ impl eframe::App for FactoryAtlasApp {
                 .size_range(215.0..=390.0)
                 .show(ui, |ui| self.draw_inspector(ui));
             egui::CentralPanel::default().show(ui, |ui| self.draw_canvas(ui));
-        } else {
+        } else if self.active_view == MainView::Resources {
             egui::CentralPanel::default().show(ui, |ui| {
                 ui.heading("Каталог ресурсов");
                 ui.label(egui::RichText::new("Создавайте собственные предметы и жидкости. Они принадлежат только этому проекту.").color(muted()));
                 ui.separator();
                 egui::ScrollArea::vertical().show(ui, |ui| self.draw_resource_editor(ui));
             });
+        } else {
+            egui::CentralPanel::default().show(ui, |ui| self.draw_visual_library(ui));
         }
         self.draw_node_dialog(&ctx);
         self.draw_link_dialog(&ctx);

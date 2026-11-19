@@ -5,6 +5,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -668,6 +669,14 @@ pub fn load_visual_index_file(path: &Path) -> Vec<VisualEntrySummary> {
 /// Scans a local directory containing `<namespace>/{models,textures,blockstates,lang}`
 /// into `VisualEntrySummary` rows. Read-only index only — never creates factory items or recipes.
 pub fn build_local_visual_index_from_dir(root_dir: &Path) -> Vec<VisualEntrySummary> {
+    build_local_visual_index_from_dir_with_progress(root_dir, &AtomicBool::new(false), |_| {})
+}
+
+pub fn build_local_visual_index_from_dir_with_progress(
+    root_dir: &Path,
+    cancelled: &AtomicBool,
+    on_progress: impl FnMut(usize),
+) -> Vec<VisualEntrySummary> {
     let Ok(read_ns) = fs::read_dir(root_dir) else {
         return Vec::new();
     };
@@ -675,6 +684,8 @@ pub fn build_local_visual_index_from_dir(root_dir: &Path) -> Vec<VisualEntrySumm
         root_dir: root_dir.to_path_buf(),
     };
     let mut entries: Vec<VisualEntrySummary> = Vec::new();
+    let mut file_count = 0usize;
+    let mut on_progress = on_progress;
 
     for ns_ent in read_ns.flatten() {
         if !ns_ent.file_type().is_ok_and(|ft| ft.is_dir()) {
@@ -695,8 +706,15 @@ pub fn build_local_visual_index_from_dir(root_dir: &Path) -> Vec<VisualEntrySumm
             "textures/item",
             "textures/block",
         ] {
+            if cancelled.load(Ordering::Relaxed) {
+                return entries;
+            }
             let dir_path = ns_ent.path().join(kind_dir);
-            collect_files_recursive(&dir_path, &dir_path, &mut |rel_sub| {
+            collect_files_recursive(&dir_path, &dir_path, cancelled, &mut |rel_sub| {
+                file_count += 1;
+                if file_count % 128 == 0 {
+                    on_progress(file_count);
+                }
                 let stem = rel_sub
                     .trim_end_matches(".json")
                     .trim_end_matches(".png")
@@ -735,7 +753,7 @@ pub fn build_local_visual_index_from_dir(root_dir: &Path) -> Vec<VisualEntrySumm
                         source_commit: "local".to_owned(),
                         mod_version: "local".to_owned(),
                         minecraft_version: "1.21.1".to_owned(),
-                        license: "Local User Override / Inspection".to_owned(),
+                        license: "Not reviewed; local inspection only".to_owned(),
                         blockstate_path: None,
                         model_ref: None,
                         model_path: None,
@@ -780,6 +798,9 @@ pub fn build_local_visual_index_from_dir(root_dir: &Path) -> Vec<VisualEntrySumm
         }
 
         for mut entry in seen_ids.into_values() {
+            if cancelled.load(Ordering::Relaxed) {
+                return entries;
+            }
             let resolved = resolve_visual_entry_asset(&entry, &source);
             entry.model_support = resolved.kind;
             entry.has_model_3d = resolved.kind == ModelSupportStatus::ThreeDJsonElements;
@@ -800,14 +821,25 @@ pub fn build_local_visual_index_from_dir(root_dir: &Path) -> Vec<VisualEntrySumm
     entries
 }
 
-fn collect_files_recursive(base: &Path, cur: &Path, cb: &mut dyn FnMut(&str)) {
+fn collect_files_recursive(
+    base: &Path,
+    cur: &Path,
+    cancelled: &AtomicBool,
+    cb: &mut dyn FnMut(&str),
+) {
+    if cancelled.load(Ordering::Relaxed) {
+        return;
+    }
     let Ok(rd) = fs::read_dir(cur) else {
         return;
     };
     for ent in rd.flatten() {
+        if cancelled.load(Ordering::Relaxed) {
+            return;
+        }
         let p = ent.path();
         if ent.file_type().is_ok_and(|ft| ft.is_dir()) {
-            collect_files_recursive(base, &p, cb);
+            collect_files_recursive(base, &p, cancelled, cb);
         } else if ent.file_type().is_ok_and(|ft| ft.is_file())
             && let Ok(rel) = p.strip_prefix(base)
         {
@@ -839,4 +871,41 @@ fn humanize_stem(stem: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+#[cfg(test)]
+mod visual_index_tests {
+    use super::build_local_visual_index_from_dir_with_progress;
+    use std::sync::atomic::AtomicBool;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn local_index_reports_progress_and_respects_cancellation() {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let folder = std::env::temp_dir().join(format!("factory-atlas-visual-{nonce}"));
+        let textures = folder.join("minecraft/textures/item");
+        std::fs::create_dir_all(&textures).unwrap();
+        for index in 0..128 {
+            std::fs::write(textures.join(format!("test_{index}.png")), b"fixture").unwrap();
+        }
+
+        let mut progress = Vec::new();
+        let entries = build_local_visual_index_from_dir_with_progress(
+            &folder,
+            &AtomicBool::new(false),
+            |done| progress.push(done),
+        );
+        assert_eq!(entries.len(), 128);
+        assert!(entries.iter().all(|entry| entry.has_texture_2d));
+        assert_eq!(progress, vec![128]);
+
+        let cancelled = AtomicBool::new(true);
+        assert!(
+            build_local_visual_index_from_dir_with_progress(&folder, &cancelled, |_| {}).is_empty()
+        );
+        std::fs::remove_dir_all(folder).unwrap();
+    }
 }
