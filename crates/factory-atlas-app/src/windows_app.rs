@@ -779,7 +779,7 @@ impl FactoryAtlasApp {
                         || entry.id.to_lowercase().contains(&query)
                         || entry.name_en.to_lowercase().contains(&query)
                         || entry.name_ru.as_deref().is_some_and(|name| name.to_lowercase().contains(&query))
-                }).cloned().take(300).collect();
+                }).take(300).cloned().collect();
                 for entry in visible {
                     let selected = self.selected_visual_id.as_deref() == Some(entry.id.as_str());
                     let label = format!("{}  {}", if entry.has_texture_2d { "▧" } else { "◇" }, entry.name_ru.as_deref().unwrap_or(&entry.name_en));
