@@ -704,7 +704,7 @@ impl FactoryAtlasApp {
                 egui::Rect::from_min_size(position, egui::vec2(196.0, 88.0) * self.canvas_zoom);
             let response = ui.interact(
                 node_rect,
-                egui::IdSalt::new(node.id.clone()),
+                ui.make_persistent_id(node.id.clone()),
                 egui::Sense::click_and_drag(),
             );
             let selected = self.selected_node_id.as_deref() == Some(node.id.as_str());
@@ -1382,10 +1382,10 @@ impl eframe::App for FactoryAtlasApp {
 
         egui::Panel::top("factory-atlas-toolbar")
             .exact_size(55.0)
-            .show_inside(ui, |ui| self.draw_toolbar(ui));
+            .show(ui, |ui| self.draw_toolbar(ui));
         egui::Panel::bottom("factory-atlas-status")
             .exact_size(28.0)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.colored_label(
                         if self.status_is_error {
@@ -1410,11 +1410,11 @@ impl eframe::App for FactoryAtlasApp {
                 .resizable(true)
                 .default_size(132.0)
                 .size_range(88.0..=260.0)
-                .show_inside(ui, |ui| self.draw_analysis(ui));
+                .show(ui, |ui| self.draw_analysis(ui));
         }
         egui::Panel::left("factory-atlas-navigation")
             .exact_size(166.0)
-            .show_inside(ui, |ui| {
+            .show(ui, |ui| {
                 ui.add_space(7.0);
                 self.draw_navigation(ui);
             });
@@ -1423,12 +1423,12 @@ impl eframe::App for FactoryAtlasApp {
                 .resizable(true)
                 .default_size(238.0)
                 .size_range(185.0..=370.0)
-                .show_inside(ui, |ui| self.draw_catalog(ui));
+                .show(ui, |ui| self.draw_catalog(ui));
             egui::Panel::right("factory-atlas-inspector")
                 .resizable(true)
                 .default_size(270.0)
                 .size_range(215.0..=390.0)
-                .show_inside(ui, |ui| self.draw_inspector(ui));
+                .show(ui, |ui| self.draw_inspector(ui));
             egui::CentralPanel::default().show(ui, |ui| self.draw_canvas(ui));
         } else {
             egui::CentralPanel::default().show(ui, |ui| {
