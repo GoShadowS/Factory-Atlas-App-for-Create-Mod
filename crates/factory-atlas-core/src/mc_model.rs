@@ -712,7 +712,7 @@ pub fn build_local_visual_index_from_dir_with_progress(
             let dir_path = ns_ent.path().join(kind_dir);
             collect_files_recursive(&dir_path, &dir_path, cancelled, &mut |rel_sub| {
                 file_count += 1;
-                if file_count % 128 == 0 {
+                if file_count.is_multiple_of(128) {
                     on_progress(file_count);
                 }
                 let stem = rel_sub
