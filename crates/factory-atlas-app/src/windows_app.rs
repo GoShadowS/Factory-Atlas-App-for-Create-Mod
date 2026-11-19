@@ -9,7 +9,7 @@ use factory_atlas_core::storage::{AppPaths, load_project_file, save_project_file
 use factory_atlas_core::worker_pool::{BackgroundJob, BackgroundOutput, WorkerPool};
 use rfd::FileDialog;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 enum PendingAction {
@@ -406,7 +406,7 @@ impl FactoryAtlasApp {
         }
     }
 
-    fn record_recent_project(&mut self, path: &PathBuf) {
+    fn record_recent_project(&mut self, path: &Path) {
         let value = path.to_string_lossy().to_string();
         self.settings
             .recent_projects
@@ -814,13 +814,14 @@ impl FactoryAtlasApp {
                 egui::FontId::proportional(13.0),
                 copper(),
             );
-            if response.clicked() {
-                if let Some(pos) = response.interact_pointer_pos() {
-                    if pos.y > center.y + 18.0 && pos.x < center.x {
-                        self.active_view = MainView::Resources;
-                    } else if pos.y > center.y + 18.0 {
-                        self.show_node_dialog = true;
-                    }
+            if response.clicked()
+                && let Some(pos) = response.interact_pointer_pos()
+                && pos.y > center.y + 18.0
+            {
+                if pos.x < center.x {
+                    self.active_view = MainView::Resources;
+                } else {
+                    self.show_node_dialog = true;
                 }
             }
         }
@@ -854,7 +855,7 @@ impl FactoryAtlasApp {
             }
             ui.separator();
             ui.label(egui::RichText::new("Проект").strong());
-            ui.label(format!("{}", self.project.name));
+            ui.label(&self.project.name);
             ui.small(format!(
                 "{} ресурсов · {} машин · {} рецептов",
                 self.project.custom_resources.len(),
@@ -913,13 +914,13 @@ impl FactoryAtlasApp {
                 let mut value = (*rate)
                     .map(|rate| rate.to_string())
                     .unwrap_or_else(|| "0".to_owned());
-                if ui.add(egui::TextEdit::singleline(&mut value)).changed() {
-                    if let Ok(parsed) = value.parse::<f64>() {
-                        if parsed.is_finite() && parsed >= 0.0 {
-                            *rate = Some(parsed);
-                            changed = true;
-                        }
-                    }
+                if ui.add(egui::TextEdit::singleline(&mut value)).changed()
+                    && let Ok(parsed) = value.parse::<f64>()
+                    && parsed.is_finite()
+                    && parsed >= 0.0
+                {
+                    *rate = Some(parsed);
+                    changed = true;
                 }
             }
             if let Some(note) = node.note_text.as_mut() {
